@@ -1,78 +1,69 @@
 ---
-import AutoVideo from '../components/AutoVideo.astro';
-import BaseHead from '../components/BaseHead.astro';
-import Footer from '../components/Footer.astro';
-import Header from '../components/Header.astro';
-import { SITE_DESCRIPTION, SITE_TITLE } from '../consts';
+import AutoVideo from "../components/AutoVideo.astro";
+import BaseHead from "../components/BaseHead.astro";
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import { SITE_DESCRIPTION, SITE_TITLE } from "../consts";
 ---
 
 <!doctype html>
 <html lang="en">
-	<head>
-		<BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
-	</head>
-	<body>
-		<Header />
-		<AutoVideo 
-			videoSrc="/videos/portfolio-backdrop.mp4" 
-			fallbackImage="/images/src/images/portfolio-backdrop-fallback.png" 
-			height="100vh">
-			<div class="name-wrapper">
-				<div class="name-title">
-					<h1>Chase Morgan</h1>
-					<p>Game & Graphics Programmer</p>
-				</div>
-			</div>
-		</AutoVideo>
-		<main>
-			<p>Here are a few ideas on how to get started with the template:</p>
-			<ul>
-				<li>Edit this page in <code>src/pages/index.astro</code></li>
-				<li>Edit the site header items in <code>src/components/Header.astro</code></li>
-				<li>Add your name to the footer in <code>src/components/Footer.astro</code></li>
-				<li>Check out the included blog posts in <code>src/content/blog/</code></li>
-				<li>Customize the blog post page layout in <code>src/layouts/BlogPost.astro</code></li>
-			</ul>
-		</main>
-		<Footer />
-	</body>
+  <head>
+    <BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
+  </head>
+  <body>
+    <Header />
+    <AutoVideo
+      videoSrc=`${import.meta.env.BASE_URL}videos/portfolio-backdrop.mp4`
+      fallbackImage=`${import.meta.env.BASE_URL} images/src/images/portfolio-backdrop-fallback.png`
+      height="100vh"
+    >
+      <div class="name-wrapper">
+        <div class="name-title">
+          <h1>Chase Morgan</h1>
+          <p>Game & Graphics Programmer</p>
+        </div>
+      </div>
+    </AutoVideo>
+    <Footer />
+  </body>
 </html>
 
 <style>
-	.name-wrapper{
-		display: flex;
-		align-items: center;
-		justify-content: flex-start;
-		width: 100%;
-		height: 100%;
-		padding-left: 5rem;
-		box-sizing: border-box;
-	}
-	.name-title h1{
-		font-size: clamp(2rem, 6vw, 6rem);
-		color:white;
-		margin: 0 0 0.5rem 0;
+  .name-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    height: 100%;
+    padding-left: 5rem;
+    box-sizing: border-box;
+  }
+  .name-title h1 {
+    font-size: clamp(2rem, 6vw, 6rem);
+    color: white;
+    margin: 0 0 0.5rem 0;
 
-		animation: fadeSlideRight 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-		opacity: 0;
-	}
-	.name-title p{
-		font-size: clamp(1rem, 3vw, 3rem);
-		color:lightgray;
-		margin: 0 0 0.5rem 0;
-		
-		animation: fadeSlideRight 2s cubic-bezier(0.16, 1, 0.3, 1) 0.5s forwards;
-		opacity: 0;
-	}
+    animation: fadeSlideRight 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    opacity: 0;
+  }
+  .name-title p {
+    font-size: clamp(1rem, 3vw, 3rem);
+    color: lightgray;
+    margin: 0 0 0.5rem 0;
 
-	@keyframes fadeSlideRight{
-		from {
-			opacity: 0;
-			transform: translateX(-100%);
-		}
-		to{
-			opacity: 1;
-			transform: translateX(0);
-		}
-	}
+    animation: fadeSlideRight 2s cubic-bezier(0.16, 1, 0.3, 1) 0.5s forwards;
+    opacity: 0;
+  }
+
+  @keyframes fadeSlideRight {
+    from {
+      opacity: 0;
+      transform: translateX(-100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
 </style>
