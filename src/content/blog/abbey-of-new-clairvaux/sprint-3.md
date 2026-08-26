@@ -2,7 +2,7 @@
 title: "Abbey Of New Clairvaux AR App Tour Sprint 3"
 description: "YOLO Model"
 pubDate: "Apr 12 2026"
-heroImage: "../../../assets/blog-placeholder-3.jpg"
+heroImage: "../../../assets/ar-tour-backdrop.jpg"
 ---
 
 Sprint three is over and with it came some good work on the project! This sprint we were able to get an actual build out for testing. A lot was learned during this sprint, especially about dealing with lower performant platforms like web builds for Unity. Unfortunately, due to the complexity of the tasks assigned this sprint only three cards were completed. The main thing focused on during this sprint was implementing the main feature for this product which is the scanning feature.

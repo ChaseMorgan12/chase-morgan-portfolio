@@ -2,7 +2,7 @@
 title: "Abbey Of New Clairvaux AR App Tour Sprint 2"
 description: "Setting up project"
 pubDate: "Mar 29 2026"
-heroImage: "../../../assets/blog-placeholder-3.jpg"
+heroImage: "../../../assets/ar-tour-backdrop.jpg"
 ---
 
 Sprint two is over and with it came a fair amount of work on the project. Unfortunately, this sprint was only one week in length total so there was less time to complete work than other sprints. This sprint I completed around 6 cards all related to the POI system for the project.
