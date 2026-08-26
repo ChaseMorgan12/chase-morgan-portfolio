@@ -1,5 +1,5 @@
 ---
-title: "Sprint 4"
+title: "Abbey Of New Clairvaux AR App Tour Sprint 4"
 description: "Fully Trained Model"
 pubDate: "Apr 26 2026"
 heroImage: "../../../assets/blog-placeholder-3.jpg"

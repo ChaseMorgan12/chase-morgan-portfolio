@@ -1,5 +1,5 @@
 ---
-title: "Sprint 2"
+title: "Abbey Of New Clairvaux AR App Tour Sprint 2"
 description: "Setting up project"
 pubDate: "Mar 29 2026"
 heroImage: "../../../assets/blog-placeholder-3.jpg"

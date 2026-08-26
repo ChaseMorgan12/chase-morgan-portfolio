@@ -1,5 +1,5 @@
 ---
-title: "Sprint 3"
+title: "Abbey Of New Clairvaux AR App Tour Sprint 3"
 description: "YOLO Model"
 pubDate: "Apr 12 2026"
 heroImage: "../../../assets/blog-placeholder-3.jpg"
