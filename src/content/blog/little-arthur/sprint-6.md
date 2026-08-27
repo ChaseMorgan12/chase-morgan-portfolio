@@ -3,6 +3,7 @@ title: "Little Arthur Sprint 6"
 description: "User Experience"
 pubDate: "Apr 23 2026"
 heroImage: "../../../assets/little-arthur-image.png"
+project: "little-arthur"
 ---
 
 Sprint six is over and with it came much more content added to the game! This sprint I completed 13 cards with a total of 15 points. A lot of bug cards were also moved as well getting ready for the beta release of the game. This sprint was mostly focused on quality-of-life changes along with sound implementation.

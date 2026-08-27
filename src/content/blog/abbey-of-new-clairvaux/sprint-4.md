@@ -3,6 +3,7 @@ title: "Abbey Of New Clairvaux AR App Tour Sprint 4"
 description: "Fully Trained Model"
 pubDate: "Apr 26 2026"
 heroImage: "../../../assets/ar-tour-backdrop.jpg"
+project: "ar-app-tour"
 ---
 
 Sprint four is over and with it came a lot of progress towards finishing this project! The main goal for this sprint was to get a test build to show off to our client at New Clairvaux. For this we needed to take our pre-trained model and train it with the actual data needed. For this we had a few team members (including myself) go on-site to capture the necessary data. Very little programming was done this sprint as most programming was completed last sprint and now, we just need data. 14 cards were completed in total during sprint four.

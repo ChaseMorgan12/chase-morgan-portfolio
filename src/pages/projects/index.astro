@@ -7,9 +7,14 @@ import FormattedDate from "../../components/FormattedDate.astro";
 import Header from "../../components/Header.astro";
 import { SITE_DESCRIPTION, SITE_TITLE } from "../../consts";
 
-const posts = (await getCollection("projects")).sort(
-  (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf(),
-);
+const posts = (await getCollection("projects")).sort((a, b) => {
+  const indexA =
+    a.data.displayIndex !== undefined ? a.data.displayIndex : Infinity;
+  const indexB =
+    b.data.displayIndex !== undefined ? b.data.displayIndex : Infinity;
+
+  return indexA - indexB;
+});
 ---
 
 <!doctype html>
@@ -104,6 +109,7 @@ const posts = (await getCollection("projects")).sort(
                     />
                   )}
                   <h4 class="title">{post.data.title}</h4>
+                  <h4 class="role">{post.data.role}</h4>
                   <p class="date">
                     <FormattedDate date={post.data.pubDate} />
                   </p>

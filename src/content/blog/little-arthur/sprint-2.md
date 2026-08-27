@@ -3,6 +3,7 @@ title: "Little Arthur Sprint 2"
 description: "Player Abilities, Movement and Enemies"
 pubDate: "Feb 18 2026"
 heroImage: "../../../assets/little-arthur-image.png"
+project: "little-arthur"
 ---
 
 Sprint 2 is finished and with it came 18 points of completion! A lot was completed this sprint, and I am extremely proud of the team with how much we pushed through especially with sprint 1 being as slow as it was. A lot of the work this sprint was related to player abilities, movement, and enemies. I also did do a bit of audio, animation, and model implementation.

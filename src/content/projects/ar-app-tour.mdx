@@ -1,0 +1,23 @@
+---
+title: "Abbey of New Clairvaux AR App Tour"
+description: "Interactive AR App Tour"
+pubDate: "Aug 01 2026"
+heroImage: "../../assets/ar-tour-backdrop.jpg"
+displayIndex: 1
+role: "Lead AI Engineer"
+---
+
+import LinkButton from "../../components/LinkButton.astro";
+import LocalRedirectButton from "../../components/LocalRedirectButton.astro";
+import HorizontalContainer from "../../components/HorizontalContainer.astro";
+
+The goal of this augmented reality project is to serve as an educational guide, helping users learn more about the history of The Abbey of Our Lady of New Clairvaux. Our team worked alongside Brother Luis Cortez, director of development and volunteer programs, as he highlighted his experience by walking us through behind-the-scenes details and the history, and sharing his personal experiences at the abbey. Our product, Abbey of New Clairvaux AR tour, provides an accessible, self-guided, educational tour of the property, with interactive elements users can tap to view historical information about each stop. The self-guided tour is accessed via your smartphone: scan the QR code on a brochure provided by the abbey to open the website application. From there, users can tap through different stops of their choice within the property. When they arrive at a stop via the website application, they can scan items using the camera on their device to get a more in-depth explanation of the history of this specific stop. Overall, this AR tool allows users to explore their personal interests within the property and engage in an interactive experience.
+
+My personal work on this project included the making of the local machine learning algorithm that scans each stop using Unity Sentis (formely known as Inference Engine) to leverage the devices graphics device. Utilizing a massive dataset of ~7350 total images taken on location throughout the semester. Every image had to be perfectly labelled in Label-Studio and then trained using a custom YOLO model in PyTorch. This model is exported to Unity and leveraging Sentis alongside a user's camera can easily scan their surroundings.
+
+This project was unvailed at the local Blessing of the Grapes on site at New Clairvaux to a crowd of roughly 2,000 individuals. Check out the app for yourself by clicking the link to the website below or if you want to know the step by step progress throughout the semester, you can click the blog posts link!
+
+<HorizontalContainer align="center">
+  <LocalRedirectButton href="/chase-morgan-portfolio/blog">Blog Posts</LocalRedirectButton>
+  <LinkButton href="https://metx.yourweb.csuchico.edu/NewClairvaux/index.html">Website</LinkButton>
+</HorizontalContainer>

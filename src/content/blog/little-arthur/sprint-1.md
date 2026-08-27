@@ -3,6 +3,7 @@ title: "Little Arthur Sprint 1"
 description: "Base Systems"
 pubDate: "Feb 05 2026"
 heroImage: "../../../assets/little-arthur-image.png"
+project: "little-arthur"
 ---
 
 Sprint 1 has already been completed and with it came with many of our base systems done. This project I am more or less taking a backseat to implementation of most frontend systems and instead focusing on backend systems. This sprint had me completing a custom multi-player input manager, player camera systems, project setup, and the framework for our enemy system.

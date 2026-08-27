@@ -11,9 +11,11 @@ const blog = defineCollection({
 			title: z.string(),
 			description: z.string(),
 			// Transform string to Date object
-			pubDate: z.coerce.date(),
+			pubDate: z.union([z.coerce.date(), z.string()]),
 			updatedDate: z.coerce.date().optional(),
 			heroImage: z.optional(image()),
+			role: z.string().optional(),
+			project: z.string()
 		}),
 });
 
@@ -26,9 +28,12 @@ const projects = defineCollection({
 			title: z.string(),
 			description: z.string(),
 			// Transform string to Date object
-			pubDate: z.coerce.date(),
+			pubDate: z.union([z.coerce.date(), z.string()]),
 			updatedDate: z.coerce.date().optional(),
 			heroImage: z.optional(image()),
+			displayIndex: z.int(),
+			role: z.string().optional(),
+			project: z.string().optional()
 		}),
 });
 

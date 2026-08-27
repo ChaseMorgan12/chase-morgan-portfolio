@@ -3,6 +3,7 @@ title: "Little Arthur Sprint 3"
 description: "Enemies"
 pubDate: "Mar 03 2026"
 heroImage: "../../../assets/little-arthur-image.png"
+project: "little-arthur"
 ---
 
 Sprint three has come to a close and with it came a lot of progress towards game completion! This sprint I was able to complete 13 cards and the entire team completed 194 points. This sets a new record for work completed in one sprint for this team and sets a good precedence for future sprints if this is our velocity throughout the project.

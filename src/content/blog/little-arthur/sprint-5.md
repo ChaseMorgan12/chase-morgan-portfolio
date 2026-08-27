@@ -3,6 +3,7 @@ title: "Little Arthur Sprint 5"
 description: "Animation and User Interface"
 pubDate: "Apr 09 2026"
 heroImage: "../../../assets/little-arthur-image.png"
+project: "little-arthur"
 ---
 
 Sprint five is complete and with it came some nice additions to the project. This sprint had a bit less work complete; however, our game is in a really good state right now and I was given far less work to complete. During this sprint I completed eight cards which most related either to animation or UI updates.

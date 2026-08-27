@@ -1,20 +1,165 @@
 ---
 import { type CollectionEntry, getCollection, render } from "astro:content";
 import BlogPost from "../../layouts/BlogPost.astro";
+import Footer from "../../components/Footer.astro";
+import { Image } from "astro:assets";
+import FormattedDate from "../../components/FormattedDate.astro";
 
 export async function getStaticPaths() {
-  const posts = await getCollection("projects");
-  return posts.map((post) => ({
-    params: { slug: post.id },
-    props: post,
-  }));
-}
-type Props = CollectionEntry<"projects">;
+  const projectOverviews = await getCollection("projects");
+  const blogSprints = await getCollection("blog");
 
-const post = Astro.props;
-const { Content } = await render(post);
+  const projectPaths = projectOverviews.map((post) => ({
+    params: { slug: post.id },
+    props: { type: "project" as const, dataRecord: post },
+  }));
+
+  const blogPaths = blogSprints.map((post) => ({
+    params: { slug: post.id },
+    props: { type: "blog" as const, dataRecord: post },
+  }));
+
+  return [...projectPaths, ...blogPaths];
+}
+
+type Props = {
+  type: "project" | "blog";
+  dataRecord: CollectionEntry<"projects"> | CollectionEntry<"blog">;
+};
+
+const { type, dataRecord } = Astro.props;
+const { Content } = await render(dataRecord);
+
+let associatedBlogPosts: CollectionEntry<"blog">[] = [];
+
+if (type === "project") {
+  const allBlogEntries = await getCollection("blog");
+
+  associatedBlogPosts = allBlogEntries
+    .filter((blogEntry) => {
+      return blogEntry.data.project === dataRecord.id;
+    })
+    .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf()
+  );
+}
 ---
 
-<BlogPost {...post.data}>
+<BlogPost {...dataRecord.data}>
+  {
+    type === "blog" && (
+      <div class="back-link">
+        {}
+        <a
+          href={`${import.meta.env.BASE_URL}/projects/${dataRecord.data.project}/`}
+        >
+          ← Back to Project Overview
+        </a>
+      </div>
+    )
+  }
+
   <Content />
+
+  {
+    type === "project" && associatedBlogPosts.length > 0 && (
+      <section class="related-logs-section">
+        <h2 style="text-align: center;">Blog Posts</h2>
+        <hr class="section-divider"/>
+        <ul class="logs-grid">
+          {associatedBlogPosts.map((blogPost) => (
+            <li>
+              <a href={`${import.meta.env.BASE_URL}/blog/${blogPost.id}/`}>
+                {blogPost.data.heroImage && (
+                  <Image
+                    width={720}
+                    height={360}
+                    src={blogPost.data.heroImage}
+                    alt=""
+                    class="log-thumbnail"
+                  />
+                )}
+                <h4 class="title">{blogPost.data.title}</h4>
+                <p class="date">
+                  <FormattedDate date={blogPost.data.pubDate} />
+                </p>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
 </BlogPost>
+
+
+<style>
+  .back-link {
+    margin-bottom: 2rem;
+  }
+  .back-link a {
+    text-decoration: none;
+    color: rgb(var(--accent));
+    font-weight: 500;
+  }
+  .back-link a:hover {
+    text-decoration: underline;
+  }
+  .related-logs-section {
+    margin-top: 4rem;
+    width: 100%;
+  }
+  .section-divider {
+    border: 0;
+    border-top: 1px solid #ccc;
+    margin-bottom: 3rem;
+  }
+  .logs-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2rem;
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+  }
+  .logs-grid li {
+    width: calc(50% - 1rem);
+  }
+  .logs-grid li * {
+    text-decoration: none;
+    transition: 0.2s ease;
+  }
+  .logs-grid li img {
+    margin-bottom: 0.5rem;
+    border-radius: 12px;
+    width: 100%;
+    height: auto;
+  }
+  .logs-grid li a {
+    display: block;
+  }
+  .title {
+    margin: 0;
+    color: rgb(var(--black));
+    line-height: 1.2;
+    font-size: 1.25rem;
+  }
+  .date {
+    margin: 0.25rem 0 0 0;
+    color: rgb(var(--gray));
+    font-size: 0.9rem;
+  }
+  .logs-grid li a:hover .title {
+    color: rgb(var(--accent));
+  }
+  .logs-grid a:hover img {
+    box-shadow: var(--box-shadow);
+  }
+  @media (max-width: 720px) {
+    .logs-grid {
+      gap: 1.5rem;
+    }
+    .logs-grid li {
+      width: 100%;
+    }
+  }
+</style>

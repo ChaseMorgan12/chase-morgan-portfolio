@@ -3,6 +3,7 @@ title: "Little Arthur Sprint 4"
 description: "Bosses"
 pubDate: "Mar 26 2026"
 heroImage: "../../../assets/little-arthur-image.png"
+project: "little-arthur"
 ---
 
 Sprint four is over and with it came a ton of features! 29 cards were completed alongside two bug cards for a total of 33 points. This was the biggest sprint for me and a very good sprint for the rest of the team. The main focus for this sprint was on bosses and items, of which I can happily say are all implemented and work properly! There are 11 items currently alongside three bosses.

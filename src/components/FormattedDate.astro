@@ -1,17 +1,22 @@
 ---
 interface Props {
-	date: Date;
+  date: Date;
 }
 
 const { date } = Astro.props;
+const isRealDate = date instanceof Date && !isNaN(date.valueOf());
 ---
 
-<time datetime={date.toISOString()}>
-	{
-		date.toLocaleDateString('en-us', {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric',
-		})
-	}
-</time>
+{
+  isRealDate ? (
+    <time datetime={(date as Date).toISOString()}>
+      {(date as Date).toLocaleDateString("en-us", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })}
+    </time>
+  ) : (
+    <span class="coming-soon-badge">{date}</span>
+  )
+}
