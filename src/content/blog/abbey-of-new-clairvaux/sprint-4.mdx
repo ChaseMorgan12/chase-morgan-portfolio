@@ -9,7 +9,7 @@ project: "ar-app-tour"
 Sprint four is over and with it came a lot of progress towards finishing this project! The main goal for this sprint was to get a test build to show off to our client at New Clairvaux. For this we needed to take our pre-trained model and train it with the actual data needed. For this we had a few team members (including myself) go on-site to capture the necessary data. Very little programming was done this sprint as most programming was completed last sprint and now, we just need data. 14 cards were completed in total during sprint four.
 
 <figure class="gif-card">
-  <img src="/gifs/Abbey_Full_Object_Detection.gif" alt="Full Object Detection" />
+  <img src={`${import.meta.env.BASE_URL}/gifs/Abbey_Full_Object_Detection.gif`} alt="Full Object Detection" />
   <figcaption>Full Object Detection</figcaption>
 </figure>
 
@@ -61,7 +61,7 @@ if (Texture != null && _model != null)
 After that I made some visual display for when the user is scanning. Before, it was just scanning under the hood, but now it will tell the user when it is scanning, if it found something, and an error if nothing was found. This is all handled via the event in the scan service that invokes when a scan starts and is finished. A variable is then set in a data object which the UI binds to via data bindings.
 
 <figure class="gif-card">
-  <img src="/gifs/Abbey_Bounding_Boxes.gif" alt="Bounding Boxes" />
+  <img src={`${import.meta.env.BASE_URL}/gifs/Abbey_Bounding_Boxes.gif`} alt="Bounding Boxes" />
   <figcaption>Bounding Boxes</figcaption>
 </figure>
 
@@ -72,6 +72,6 @@ Next came the lengthy part, labelling and validating the data. Every image taken
 Overall, this sprint started out stressful as we were still unsure if we would be able to meet our deadline. With this success it completely got rid of any worries I had about this project and now I believe we will make our May 14th deadline no problem! Thanks for reading!
 
 <figure class="gif-card">
-  <img src="/gifs/Abbey_Text_Display.gif" alt="Text Diplay" />
+  <img src={`${import.meta.env.BASE_URL}/gifs/Abbey_Text_Display.gif`} alt="Text Diplay" />
   <figcaption>Text Display</figcaption>
 </figure>

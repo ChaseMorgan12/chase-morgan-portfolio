@@ -1,6 +1,6 @@
 ---
 title: "Fast and Accurate Throw Trajectory Arc using Unity Jobs and Burst"
-description: "Fully Trained Model"
+description: "Fast throw trajectory calcuator and displayer"
 pubDate: "Jul 10 2026"
 heroImage: "../../../assets/ff-throw-trajectory.gif"
 project: "fungi-frenzy"

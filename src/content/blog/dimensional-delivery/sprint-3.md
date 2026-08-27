@@ -1,0 +1,19 @@
+---
+title: "Dimensional Delivery Sprint 3"
+description: "More Portals"
+pubDate: "Oct 13 2024"
+heroImage: "../../../assets/dimensional-delivery-backdrop.gif"
+project: "dimensional-delivery"
+---
+
+Sprint three is done and over with and with it came a lot of system reworks and feature optimization. This sprint went very smoothly, and a lot of was completed within the sprint. Most of the time with this sprint went to working on new portal mechanics and reworking the portal placement for angled portal support.
+
+Portals are the core feature of Portal Packaging and thus it needs to be easy to use and very robust as players will constantly interacting with this feature. Lackluster execution on this feature will cause players to lose patience with the game and go play another easily accessible game. Thus, looking at the original implementation of portal placement, it caused many headaches for early play testers who couldn't place portals because of the system messing up and not placing the portals. Firstly, fixing portal placement on cubes especially (they were the leading cause of portals failing to place) was needed and now through the magic of rewriting code, the portal placement works about ten times better and now portals have the ability to be placed on any surface regardless of the angle. Another thing that was added to make portals feel better to work with was a portal preview system to allow the player to see where their portal will be placed and if the portal is in a valid location based on what color the preview is. This solved most issues that early play testers ran into and with a bit more polishing, portals can be pretty much considered feature complete.
+
+Portal previews actually have a lot going on under the hood that make the system fundamentally work. First, the system detects if the player is holding down tap on any of the playable space and pauses the game if it is within that playable area. Then it activates a preview model of the portal that acts as a placeholder for the portal. It will then do bounds checking and make sure the portal is placeable, if it is then it will highlight white/green, and if not, red. It will also highlight the portal that the new portal will be replacing by highlighting the old portal red to signify this. Once the player lets go, the system does one final bound check to make sure it is placeable and places the portal! With this approach the portal system is actually more straightforward in code and runs a lot smoother because it now doesn't need to do duplicate bounding checks on the placement code.
+
+Another big feature that was added that may not seem that big on the surface is level rotation. Level rotation may not seem very important or big; however, it allows the level designer to design levels that utilize all areas of the play space instead of just two walls and a floor. This does complicate levels to a certain degree, but if taken into careful consideration by the level designer some amazing levels can come out of this new feature. The rotation feature is a simple linear interpolation from one position to another based on the pivot point of the level. Early on a swipe mechanic was introduced to control this feature; however, play testers found it too hard to use so it was switched to a button that the player pushes instead.
+
+Other things that were done included a gel combination mechanic that will add complexity to the gel system allowing players to combine gel to make cool and unique gels. Lastly, general bug fixes to level loading and droppers were implemented based on feedback from play testers.
+
+Overall, this sprint went very well and sprint four seems to be including less core feature stuff and focusing on more want features instead of needs. With most mechanics already looking pretty good all that is needed is more levels, want features, and art!
