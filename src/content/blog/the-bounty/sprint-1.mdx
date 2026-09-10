@@ -1,0 +1,234 @@
+---
+title: "The Bounty Sprint 1"
+description: "Core Loop"
+pubDate: "Sept 10 2026"
+heroImage: "../../../assets/bounty-water-instancing.gif"
+project: "the-bounty"
+---
+
+Sprint one is over and with it came our main movement systems created. This sprint I was able to complete around nine cards with significant progress on one final card. All work this sprint was completed on the movement system making it feel perfect. In <i>The Bounty</i> there are two movement systems, one for the ship you are controlling and another for your character itself. The ship needs to handle like a ship so it is very sluggish and hard to rotate, while the character needs to be snappy.
+
+<h5 style="text-align: center;">Ship Movement</h5>
+For the ship, my designer wants it to feel heavy and weighty, so I started with
+a simple force add on each physics tick in Unreal. This proved to be not enough
+as there is no cap to it and quickly becomes too hard to control for the player.
+To solve this I added a maximum velocity that checks the current horizontal
+velocity and if it is too big, cap it. This cap is defined in the inspector
+through a data asset. More on the data assets later!
+
+```c++
+constexpr float CentiToMeter = 100.f;
+const float Mass = ShipPhysicsComponent->GetMass();
+
+if (!FMath::IsNearlyZero(CurrentForwardInput))
+{
+    const FVector ForwardVector = ShipPhysicsComponent->GetForwardVector();
+    FVector MoveForce = ForwardVector * CurrentForwardInput * Owner->GetDataAsset()->GetPawnMoveSpeed() * Mass;
+    MoveForce *= CentiToMeter;
+
+    ShipPhysicsComponent->AddForce(MoveForce);
+}
+
+const FVector CurrentVelocity = ShipPhysicsComponent->GetPhysicsLinearVelocity();
+const float MaxSpeed = Owner->GetDataAsset()->GetShipMaxVelocity() * CentiToMeter;
+
+FVector HorizontalVelocity = FVector(CurrentVelocity.X, CurrentVelocity.Y, 0.0f);
+if (HorizontalVelocity.SizeSquared() > FMath::Square(MaxSpeed))
+{
+    HorizontalVelocity = HorizontalVelocity.GetClampedToMaxSize(MaxSpeed);
+    ShipPhysicsComponent->SetPhysicsLinearVelocity(FVector(HorizontalVelocity.X, HorizontalVelocity.Y, CurrentVelocity.Z));
+}
+```
+
+<h6 style="text-align: center;">Ship Horizontal Movement Code</h6>
+
+One of the challenges that quickly becomes present in Unreal is that the engine is in meters; however, lists positions in centimeters which becomes a problem where listing editable data quickly becomes confusing as listing it as centimeters becomes hard to read. This also becomes a problem when Unreal systems use meters for values instead of centimeters. That is why in a lot of code I have a quick conversion float value for this.
+
+Next for the ship movement is the rotation. For rotation it is actually relatively simple as all we need to do is adding torque in radians to the boat itself every physics tick. This makes it slowly speed up, but not get too out of hand where the ship will completely spin out of control!
+
+```c++
+if (!FMath::IsNearlyZero(CurrentRotationInput))
+{
+    const FVector RotationForce = FVector(0.0f, 0.0f, CurrentRotationInput * Owner->GetDataAsset()->GetShipRotationSpeed());
+
+    ShipPhysicsComponent->AddTorqueInRadians(RotationForce, NAME_None, true);
+}
+```
+
+<h6 style="text-align: center;">Ship Rotation Code</h6>
+
+Here is the final ship movement (without water physics):
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/Bounty_Ship_Movement.gif`}
+    alt="Ship Movement"
+  />
+  <figcaption>Ship Movement</figcaption>
+</figure>
+
+<h5 style="text-align: center;">Character Movement</h5>
+
+For the character movement I tried to add a lot to it myself; however, quickly released that Unreal has a very well programmed character movement component that is automatically attached to characters in the engine. My biggest concern with it was the fact we need this character to be anchored to the ship, so I was going to do it manually. Turns out, the built-in movement component automatically tracks physics surfaces so that was completely unnecessary. All that was done was setting base settings needed and hooking up input. Here is the code for the character!
+
+```c++
+ABountyHunter::ABountyHunter()
+{
+	PrimaryActorTick.bCanEverTick = true;
+
+	if (GetCharacterMovement())
+	{
+		//These settings allow the player to move relative to the ship.
+		GetCharacterMovement()->bImpartBaseAngularVelocity = true;
+		GetCharacterMovement()->bImpartBaseVelocityX = true;
+		GetCharacterMovement()->bImpartBaseVelocityY = true;
+		GetCharacterMovement()->bImpartBaseVelocityZ = true;
+		GetCharacterMovement()->bIgnoreBaseRotation = false;
+		GetCharacterMovement()->StandingDownwardForceScale = 0.f;
+		GetCharacterMovement()->bEnablePhysicsInteraction = false;
+	}
+}
+void ABountyHunter::MoveCharacter(const FInputActionValue& Value)
+{
+	if (!DataAsset) return;
+	const FVector2D InputValue = Value.Get<FVector2D>();
+
+	const FVector ForwardVector = GetActorForwardVector();
+	const FVector RightVector = GetActorRightVector();
+
+	const float MoveMagnitude = DataAsset->GetPawnMoveSpeed();
+
+	AddMovementInput(ForwardVector, InputValue.Y * MoveMagnitude);
+	AddMovementInput(RightVector, InputValue.X * MoveMagnitude);
+}
+```
+
+<h6 style="text-align: center;">Player Movement Code</h6>
+
+Here is the final movement for the character:
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/Bounty_Character_Switching.gif`}
+    alt="Character Movement"
+  />
+  <figcaption>Character Movement Relative to Ship</figcaption>
+</figure>
+
+<h5 style="text-align: center;">Water System</h5>
+
+The water system is actually where most of my time went this sprint. It is particularly hard to tackle because the visuals need to line up with the physics. That means just slapping a noise texture and making it completely random with waves is not possible. I needed a deterministic function that can be relatively light on the CPU when ran. For this I looked into the Gerstner wave function as it is completely deterministic and is relatively light to run. I decided to start with the physics first and then line up the visuals after. Here is some of the code related to that:
+
+```c++
+float UBountyWaterSubsystem::GetWaterHeightAtLocation(const FVector& WorldLocation, float Weight) const
+{
+	float Height = 0.0f;
+
+	for (const FGerstnerWaveParams& Wave : WaveLayers)
+	{
+		if (Wave.Wavelength <= 0.f) continue;
+
+		float Frequency = (2.f * PI) / Wave.Wavelength;
+		float Phase = Wave.Speed * Frequency;
+		float Dot = (WorldLocation.X * Wave.Direction.GetSafeNormal().X) + (WorldLocation.Y * Wave.Direction.GetSafeNormal().Y);
+		float WavePhase = (Frequency * Dot) - (Phase * SynchronizedWaterTime);
+		float Amplitude = Wave.Steepness / Frequency;
+
+		Height += FMath::Sin(WavePhase) * Amplitude;
+	}
+
+	return FMath::Lerp(WorldLocation.Z, Height, Weight);
+}
+```
+
+<h6 style="text-align: center;">Get Water at Height Code</h6>
+
+This gives any actor that needs it an accurate Z position of where the water is in the world given a horizontal position. This can be used whenever is necessary to know. For example, the ship uses this to determine what parts of the ship are underwater and applies force at those points to keep itself afloat. I used the same term that Unreal uses for their water system, called pontoon points. Here is what that looks like!
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/Bounty_Ship_Buoyany.gif`}
+    alt="Ship Pontoon Points"
+  />
+  <figcaption>Ship Pontoon Points Example</figcaption>
+</figure>
+
+One issue with just using base Gerstner waves is that you can see when and where it tiles. For this I decided to use two noise maps, one to simulate wind and another to simulate cross wind. On the shader it is just as simple as giving the correct UV offset and mixing it with the wave calculations. For the CPU however, looking up a texture UV is extremely unperformant at runtime and needs to be cached. I decided to only use one noise map and apply transformations to the UV directly to save calculations and still keep deterministic. Here is the code to sync the CPU with the GPU:
+
+```c++
+uint8 UBountyWaterSubsystem::GetCachedNoiseValue(FVector2D UV) const
+{
+	if (CachedNoisePixels.Num() == 0) return 0;
+
+	float WrappedU = UV.X - FMath::FloorToFloat(UV.X);
+	float WrappedV = 1.0f - (UV.Y - FMath::FloorToFloat(UV.Y));
+
+	int PixelU = FMath::Clamp(FMath::FloorToInt(WrappedU * CachedNoiseWidth), 0, CachedNoiseWidth - 1);
+	int PixelV = FMath::Clamp(FMath::FloorToInt(WrappedV * CachedNoiseHeight), 0, CachedNoiseHeight - 1);
+
+	int Index = (PixelV * CachedNoiseWidth) + PixelU;
+
+	return CachedNoisePixels[Index];
+}
+
+float UBountyWaterSubsystem::CalculateNoise(const FVector& WorldLocation) const
+{
+	if (CachedNoisePixels.Num() == 0) return 0.0f;
+
+	FVector2D NoiseUV;
+	float FinalNoise = 0.0f;
+
+	TArray<uint8> NoiseValues;
+	NoiseValues.Reserve(NoiseLayers.Num());
+
+	int NoiseTextureWidth = CachedNoiseWidth;
+	int NoiseTextureHeight = CachedNoiseHeight;
+
+	for (const FVector4& NoiseLayer : NoiseLayers)
+	{
+		NoiseUV =
+			((FVector2D(WorldLocation.X, WorldLocation.Y) * NoiseScale) * (NoiseScale * NoiseLayer.X)) +
+			((SynchronizedWaterTime * NoiseScale) * (NoiseSpeed * NoiseLayer.Y)) *
+			(FVector2D(NoiseLayer.Z, NoiseLayer.W));
+
+		NoiseValues.Emplace(GetCachedNoiseValue(NoiseUV));
+	}
+
+	if (NoiseValues.Num() > 1)
+	{
+		float Layer0 = static_cast<float>(NoiseValues[0]) / 255.0f;
+		float Layer1 = static_cast<float>(NoiseValues[1]) / 255.0f;
+		FinalNoise = FMath::Lerp(Layer0, Layer1, 0.5f);
+	}
+
+	return FinalNoise;
+}
+```
+
+<h6 style="text-align: center;">Get Cached Noise Code</h6>
+
+The last thing related to the water system that I made, is actually the main gif of this post. I used Unreal's instancing system to draw the water directly to the GPU. It uses the exact same method that I took in <i>Fungi Frenzy</i> with the throwing arc!
+
+That was unfortunately all the work on the water I got to in this sprint, but have made significant progress on the visuals as that is what I am working on currently! Here is the water at the current state:
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/Bounty_Character_Switching.gif`}
+    alt="Water Sprint 1"
+  />
+  <figcaption>Sprint One Water</figcaption>
+</figure>
+
+<h5 style="text-align: center;">Designer QoL</h5>
+One of the biggest challenges of doing all of this code is making sure it is
+easily editable in the inspector. I like to pride myself in making easy to edit
+systems via data. This means any value that isn't static needs to be backed by
+data. In Unreal, Data Assets are the go-to way to do that. For player movement I
+have a data asset that uses composition to hold each pawn's separate movement
+data. This way allows the designer to drag and drop and create new custom
+movement by just making a new data asset instead of going into the class and
+manually editing the variables.
+
+The same thing was done with the water system which is backed by a Material Parameter Collection; however, that is soon going to be backed by a data asset as well so we can make different wave patterns for different parts of the game similar to <i>Sea of Thieves</i>.
+
+Overall, I think that this sprint went very well and cannot wait to see where sprint two takes us! Thanks for reading!
