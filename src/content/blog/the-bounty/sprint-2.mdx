@@ -1,0 +1,505 @@
+---
+title: "The Bounty Sprint 2"
+description: "Subsystems Galore"
+pubDate: "Sept 24 2026"
+heroImage: "../../../assets/bounty-grid-debug.gif"
+project: "the-bounty"
+---
+
+Sprint two is done and with it came our <i>mostly</i> complete prototype! this sprint I completed 15 cards totaling 19 points. This sprint I was focused on many of the main subsystems for our game. I tackled the main spawn director, weather system, time system, grid system, water instancing, and a few other small things!
+
+<h5 style="text-align: center;">The Spawn Director</h5>
+The spawn director was not the first thing I worked on in this sprint; however,
+it was probably the most significant system as it mimics how Valve's
+<i>Left 4 Dead</i> franchise dynamic spawner works. Basically, in
+<i>Left 4 Dead</i> there is a director that tracks many variables throughout the
+world and will dynamically spawn enemies/items for the players. It compiles a
+ton of data into one simple variable known as stress which tells it if the
+player is bored or over-stimulated. It's called the director because
+<i>Left 4 Dead</i> handles levels in movie format with the director being the
+director of the movie. The director creates the flow of the 'movie' by adding
+events at runtime in order to keep an experience that works in a general story
+format. The director's goal is to prevent the 'movie' from being too boring or
+too engaging causing burnout. The director keeps tab on the player's stress
+levels in order to tell if the player is too bored or overwhelmed. If too board?
+Spawn a horde. Too overwhelmed? Delay the next horde, or spawn a few medkits.
+
+In <i>The Bounty</i> the director works similarly where it tries to keep movie pacing. The closest movie that could follow this format is <i>Jaws</i> as it loosely follows a similar story. The spawn director follows numerous values that are fully editable via data to track where and when it should spawn objects in the world, and eventually the horror!
+
+<p style="text-align: center;">**Awareness**</p>
+The variable that the director looks at to drive its behavior is a normalized
+floating point number labelled as awareness. Awareness is how much the horror is
+aware of the player. If getting too high, the horror may pay the player a visit
+earlier than expected. If kept low, the horror will be less likely to surprise
+the player! The director looks at numerous data that relates to the player to
+see if they are being too careless or too careful. Both are signs that the
+player may need some motivation to either back down or move forward. if a player
+takes too long in a 'cell' (defined later!) the director takes that as the
+player being too careful and will increase awareness exponentially in hopes to
+keep them moving. It also steadily increases the awareness over time by talking
+to the time system and will increase it during the night. The last thing it
+tracks for now, is the use of sonar from the player. If the player scans new
+items, the awareness value will increase accordingly. Here is the example of how
+awareness is added if the player dwells too long:
+
+```c++
+void USpawnDirectorSubsystem::Tick(float DeltaTime)
+{
+	DwellTime += DeltaTime;
+
+	//The amount to increase the awareness this frame.
+	float AwarenessIncreaseAmount = 0.f;
+	TArray<FString> ReasonToIncrease;
+
+	bool bShouldApplyScaling = ActiveOptions.OnDwellSecondsIncrease > 0;
+	bool bCanAddDwellAwareness = DwellTime >= ActiveOptions.OnDwellMinTimeSeconds;
+
+	if (!bCanAddDwellAwareness) return;
+
+	if (bCanAddDwellAwareness)
+	{
+		float DwellAwareness = ActiveOptions.OnDwellTimeSecond;
+
+		if (bShouldApplyScaling)
+		{
+			const float exp = FMath::Floor((DwellTime - ActiveOptions.OnDwellMinTimeSeconds) / ActiveOptions.OnDwellSecondsIncrease);
+			const float pow = FMath::Pow(ActiveOptions.OnDwellSecondsIncreaseFactor, FMath::Max(0.f, exp));
+
+			DwellAwareness *= pow;
+		}
+
+		AwarenessIncreaseAmount += FMath::Min(DwellAwareness, ActiveOptions.OnDwellTimeSecondCap);
+
+		ReasonToIncrease.Add(TEXT("Dwelling Too Long"));
+	}
+
+	const float DeltaAwareness = (AwarenessIncreaseAmount / 100) * DeltaTime;
+
+	AddAwareness(DeltaAwareness, false, FString::Join(ReasonToIncrease, TEXT(", ")));
+}
+```
+
+<h6 style="text-align: center;">Spawn Director Dwelling Code</h6>
+
+<p style="text-align: center;">**Grid Cells**</p>
+
+The Grid System is another system with zero reference to the director; however, it is important as it drives where the spawn director will spawn objects. It is a pretty typical grid cell system where the world is divided into specified cell sizes. The default is 100 meters and can be scaled up to one kilometer for each cell. It tracks whatever actor is deemed the main actor of the scene and will only have cells within the immediate area spawned in to save performance. For cells it tracks an FIntPoint struct for location and has a static array of structs to hold instance data. When a cell is despawned it will pack its data into a compressed struct that just carries raw data that can be used to respawn itself later! Here is that code:
+
+```c++
+void UGridSubsystem::UpdateGlobalGridPosition(const FVector& WorldLocation)
+{
+	if (!GridConfig) return;
+
+	const int32 CellSize = GridConfig->GetCellSize();
+	if (CellSize <= 0.f) return;
+
+	const float SnappedX = FMath::GridSnap(WorldLocation.X, CellSize);
+	const float SnappedY = FMath::GridSnap(WorldLocation.Y, CellSize);
+
+	const int32 TargetGridX = FMath::RoundToInt(SnappedX / CellSize);
+	const int32 TargetGridY = FMath::RoundToInt(SnappedY / CellSize);
+	const FIntPoint TargetCoords(TargetGridX, TargetGridY);
+
+	if (CurrentGridCoords == FIntPoint(-999, -999))
+	{
+		CurrentGridCoords = TargetCoords;
+
+		const int32 Radius = (GridConfig->GetActiveGridSize() - 1) / 2;
+
+		for (int32 X = TargetCoords.X - Radius; X <= TargetCoords.X + Radius; ++X)
+		{
+			for (int32 Y = TargetCoords.Y - Radius; Y <= TargetCoords.Y + Radius; ++Y)
+			{
+				const FIntPoint Coord(X, Y);
+				ActiveCells.Add(Coord);
+
+				if (!CellDataMap.Contains(Coord))
+				{
+					CellDataMap.Emplace(Coord, FCellPackedData());
+				}
+
+				OnCellSpawn.Broadcast(Coord);
+			}
+		}
+
+		FCellPackedData* Data = CellDataMap.Find(TargetCoords);
+		if (Data) Data->SetIsExplored(true);
+
+		OnCellEntered.Broadcast(TargetCoords);
+
+		return;
+	}
+
+	if (TargetCoords == CurrentGridCoords) return;
+
+	const FVector CurrentCellCenter(CurrentGridCoords.X * CellSize + (CellSize * 0.5f), CurrentGridCoords.Y * CellSize + (CellSize * 0.5f), WorldLocation.Z);
+	const float DistanceFromCurrentCenter = FVector::Dist2D(WorldLocation, CurrentCellCenter);
+
+	if (DistanceFromCurrentCenter < (CellSize * 0.55f))
+	{
+		return;
+	}
+
+	const int32 Radius = (GridConfig->GetActiveGridSize() - 1) / 2;
+
+	TArray<FIntPoint> DesiredCoords;
+	for (int32 X = TargetCoords.X - Radius; X <= TargetCoords.X + Radius; ++X)
+	{
+		for (int32 Y = TargetCoords.Y - Radius; Y <= TargetCoords.Y + Radius; ++Y)
+		{
+			DesiredCoords.Add(FIntPoint(X, Y));
+		}
+	}
+
+	TArray<FIntPoint> OldCells = ActiveCells;
+	for (const FIntPoint& OldCoord : OldCells)
+	{
+		if (!DesiredCoords.Contains(OldCoord))
+		{
+			ActiveCells.Remove(OldCoord);
+			OnCellDespawn.Broadcast(OldCoord);
+		}
+	}
+
+	for (const FIntPoint& Coord : DesiredCoords)
+	{
+		if (!ActiveCells.Contains(Coord))
+		{
+			ActiveCells.Add(Coord);
+			if (!CellDataMap.Contains(Coord))
+			{
+				CellDataMap.Emplace(Coord, FCellPackedData());
+			}
+
+			OnCellSpawn.Broadcast(Coord);
+		}
+	}
+
+	FCellPackedData* Data = CellDataMap.Find(TargetCoords);
+	if (Data) Data->SetIsExplored(true);
+
+	OnCellEntered.Broadcast(TargetCoords);
+	OnCellLeft.Broadcast(CurrentGridCoords);
+
+	CurrentGridCoords = TargetCoords;
+}
+```
+
+<h6 style="text-align: center;">Grid System Code</h6>
+
+This system also has a dedicated debug mode that draws cubes where each cell midpoint is, so developers can detect when a player loads new cells or despawns old cells. This system invokes a delegate when a cell is spawned, entered, left, or despawned. This way, any system that needs to know info related to cells can.
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/bounty_grid_debug.gif`}
+    alt="Grid System"
+  />
+  <figcaption>Debug Mode</figcaption>
+</figure>
+
+<p style="text-align: center;">**Spawning**</p>
+
+The main functionality of the director is to spawn objects in the world including the horror. It subscribes to the grid system's on cell spawn/despawn delegates in order to spawn or despawn actors based on awareness. It uses an actor pooling system so we can bypass all the performance overhead of spawning actors at runtime. It maps awareness to a range that changes spawn chances of each type of spawnable object. The spawnable objects are Clue, Loot, Obstacle, or None. It also looks into the cell to see if it already has data. If it does, I just reinitialize the cell with the data saved. This is to prevent the player from just going back and forth to spawn new stuff.
+
+At first I made the system with the idea that all obstacles, clues, and loot will have one class and would use the same type of data; however, further in the development it was learned that unique behavior is needed for each type. To handle this each cell actor has an array of classes that it can be. It will then pick the best fit and take that from the pool. To optimize this I only spawn the minimum amount of subclasses that is needed if the player is surrounded by them. So for a 3x3 grid with three separate clue classes it will spawn three of each class. When it spawns, it will then grab the corresponding class with a max attempt limit. This is _not_ bulletproof but is good enough for our use case! Here is the spawning logic:
+
+```c++
+void USpawnDirectorSubsystem::OnNewCellSpawned(const FIntPoint& CellCoord)
+{
+	UGridSubsystem* GridSubsystem = GetWorld()->GetSubsystem<UGridSubsystem>();
+	if (!GridSubsystem) return;
+
+	const int32 CellSize = GridSubsystem->GetCellSize();
+
+	FCellPackedData* CellData = GridSubsystem->GetDataAtCell(CellCoord);
+	if (!CellData) return;
+
+	if (CellData->CellEntities.Num() > 0) //Already has data so we should just reinitialize it.
+	{
+		for (FPackedCellEntity& Entity : CellData->CellEntities)
+		{
+			if (Entity.ActorClass && Entity.ActorClass->IsChildOf(ACellActor::StaticClass()))
+			{
+				ACellActor* Actor = GetEntityFromPool(CellCoord, Entity.EntityType, *Entity.ActorClass);
+
+				if (Actor)
+				{
+					FVector Offset = StaticCast<FVector>(Entity.LocalOffset);
+					Actor->SetActorLocation(GridSubsystem->GetWorldLocationFromCell(CellCoord) + Offset);
+					Actor->OnActorSpawned(CellCoord);
+				}
+			}
+		}
+
+		return;
+	}
+
+	float CurrentThreshold = -1.f;
+	for (const auto& Pair : ActiveOptions.AwarenessMap)
+	{
+		if (AwarenessLevel * 100 >= Pair.Key && CurrentThreshold < Pair.Key)
+		{
+			CurrentThreshold = Pair.Key;
+		}
+	}
+
+	FAwarenessEffect& AwarenessEffect = ActiveOptions.AwarenessMap.FindOrAdd(CurrentThreshold, FAwarenessEffect());
+
+	ECellEntityType EffectType = AwarenessEffect.GetRandomType();
+
+	FCellActorArray* ClassArrayPtr = ActiveOptions.CellActorMap.Find(EffectType);
+
+	if (!ClassArrayPtr || (*ClassArrayPtr).ActorClasses.Num() <= 0) return;
+
+	const int32 NumClasses = (*ClassArrayPtr).ActorClasses.Num();
+	const int32 MaxAttempts = 5;
+	int32 Index = 0;
+
+	ACellActor* Actor = nullptr;
+	TSubclassOf<ACellActor> Class = nullptr;
+
+	while (!Actor && Index < MaxAttempts)
+	{
+		Class = (*ClassArrayPtr).ActorClasses[FMath::RandRange(0, NumClasses - 1)];
+
+		if (Class)
+		{
+			Actor = GetEntityFromPool(CellCoord, EffectType, Class);
+		}
+
+		Index++;
+	}
+
+	if (!Actor) return;
+
+	const float CellRadius = ((float)CellSize) / 2;
+	FVector3f SpawnLocation = FVector3f(FMath::RandRange(-CellRadius, CellRadius), FMath::RandRange(-CellRadius, CellRadius), 0);
+
+	FVector Offset = StaticCast<FVector>(SpawnLocation);
+	Actor->SetActorLocation(GridSubsystem->GetWorldLocationFromCell(CellCoord) + Offset);
+	Actor->OnActorSpawned(CellCoord);
+
+	FPackedCellEntity NewEntity = FPackedCellEntity();
+	NewEntity.EntityType = EffectType;
+	NewEntity.LocalOffset = SpawnLocation;
+	NewEntity.ActorClass = Class;
+
+	CellData->CellEntities.Add(NewEntity);
+}
+
+void USpawnDirectorSubsystem::OnCellDespawn(const FIntPoint& CellCoord)
+{
+	UGridSubsystem* GridSubsystem = GetWorld()->GetSubsystem<UGridSubsystem>();
+	if (!GridSubsystem) return;
+
+	const int32 CellSize = GridSubsystem->GetCellSize();
+
+	FCellPackedData* CellData = GridSubsystem->GetDataAtCell(CellCoord);
+	if (!CellData) return;
+
+	for (const auto& Entity : CellData->CellEntities)
+	{
+		ReturnEntityToPool(CellCoord, Entity.EntityType);
+	}
+}
+
+void USpawnDirectorSubsystem::InitializeEntityPool()
+{
+	UGridSubsystem* GridSubystem = GetWorld()->GetSubsystem<UGridSubsystem>();
+	if (bIsEntityPoolInitialized || !GridSubystem) return;
+
+	bIsEntityPoolInitialized = true;
+
+	const int32 StartingCount = GridSubystem->GetMaxActiveCells();
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	const FVector SpawnLocation = FVector(0, 0, -50000);
+
+	for (const auto& Class : ActiveOptions.CellActorMap)
+	{
+		if (Class.Value.ActorClasses.Num() <= 0) continue;
+
+		for (const TSubclassOf<ACellActor>& ActorClass : Class.Value.ActorClasses)
+		{
+			if (!EntityPool.Contains(ActorClass))
+			{
+				EntityPool.Emplace(ActorClass, FGridEntityPool());
+			}
+
+			FGridEntityPool& Pool = EntityPool.FindOrAdd(ActorClass);
+			Pool.Actors.SetNum(StartingCount);
+
+			for (int32 Index = 0; Index < (int32)StartingCount / Class.Value.ActorClasses.Num(); Index++)
+			{
+				ACellActor* Actor = GetWorld()->SpawnActor<ACellActor>(ActorClass, SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+
+				if (Actor)
+				{
+					Pool.Actors[Index] = Actor;
+#if WITH_EDITOR
+					Actor->SetFolderPath(FName("SpawnDirector/Pool/Inactive"));
+#endif
+					Actor->SetActorTickEnabled(false);
+					Actor->SetActorHiddenInGame(true);
+					Actor->SetActorEnableCollision(false);
+				}
+			}
+		}
+	}
+}
+
+ACellActor* USpawnDirectorSubsystem::GetEntityFromPool(const FIntPoint& CellCoord, const ECellEntityType& EntityType, const TSubclassOf<ACellActor>& InClass)
+{
+	ACellActor* Actor = nullptr;
+	if (!bIsEntityPoolInitialized) InitializeEntityPool();
+
+	if (!InClass) return Actor;
+
+	FCellActorArray* ClassArrayPtr = ActiveOptions.CellActorMap.Find(EntityType);
+	if (!ClassArrayPtr) return Actor;
+
+	int32 Index = -1;
+	ClassArrayPtr->ActorClasses.Find(InClass, Index);
+	if (Index == -1) return Actor;
+
+	if (UClass* Class = ClassArrayPtr->ActorClasses[Index])
+	{
+		FGridEntityPool* Pool = EntityPool.Find(Class);
+		if (!Pool || Pool->Actors.Num() <= 0) return Actor;
+
+		Actor = Pool->Actors.Pop(EAllowShrinking::No);
+
+		switch (EntityType)
+		{
+		case ECellEntityType::Obstacle:
+			ActiveObstacles.Emplace(CellCoord, Actor);
+			break;
+		case ECellEntityType::Clue:
+			ActiveClues.Emplace(CellCoord, Actor);
+			break;
+		case ECellEntityType::Loot:
+			ActiveLoot.Emplace(CellCoord, Actor);
+			break;
+		case ECellEntityType::None:
+		default:
+			break;
+		}
+	}
+
+	if (Actor)
+	{
+#if WITH_EDITOR
+		Actor->SetFolderPath(FName("SpawnDirector/Pool/Active"));
+#endif
+		Actor->SetActorTickEnabled(true);
+		Actor->SetActorHiddenInGame(false);
+		Actor->SetActorEnableCollision(true);
+	}
+
+	return Actor;
+}
+
+void USpawnDirectorSubsystem::ReturnEntityToPool(const FIntPoint& CellCoord, const ECellEntityType& EntityType)
+{
+	if (!bIsEntityPoolInitialized) return;
+
+	const auto GetMapFromType = [this](const ECellEntityType& Type) -> TMap<FIntPoint, TObjectPtr<ACellActor>>*
+		{
+			switch (Type)
+			{
+				case ECellEntityType::Obstacle:
+					return &ActiveObstacles;
+				case ECellEntityType::Clue:
+					return &ActiveClues;
+				case ECellEntityType::Loot:
+					return &ActiveLoot;
+				case ECellEntityType::None:
+				default:
+					break;
+			}
+
+			return nullptr;
+		};
+
+	TMap<FIntPoint, TObjectPtr<ACellActor>>* Map = GetMapFromType(EntityType);
+	if (!Map || !(*Map).Contains(CellCoord)) return;
+
+	TObjectPtr<ACellActor> SpawnedActor = (*Map).FindAndRemoveChecked(CellCoord);
+
+	FCellActorArray* ClassArrayPtr = ActiveOptions.CellActorMap.Find(EntityType);
+
+	if (!ClassArrayPtr) return;
+
+	if (SpawnedActor)
+	{
+		SpawnedActor->SetActorLocation(FVector(0, 0, -50000));
+#if WITH_EDITOR
+		SpawnedActor->SetFolderPath(FName("SpawnDirector/Pool/Inactive"));
+#endif
+		SpawnedActor->SetActorTickEnabled(false);
+		SpawnedActor->SetActorHiddenInGame(true);
+		SpawnedActor->SetActorEnableCollision(false);
+		SpawnedActor->OnActorDespawned(CellCoord);
+
+		int32 Index = -1;
+		ClassArrayPtr->ActorClasses.Find(SpawnedActor->GetClass(), Index);
+
+		if (Index <= -1) return;
+
+		if (TSubclassOf<AActor> Class = ClassArrayPtr->ActorClasses[Index])
+		{
+			FGridEntityPool* Pool = EntityPool.Find(Class);
+
+			if (Pool)
+			{
+				Pool->Actors.Push(SpawnedActor);
+			}
+		}
+	}
+}
+```
+
+<h6 style="text-align: center;">Spawn Director Cell Spawn Code</h6>
+
+The director also handles the initialization and spawning of the horror. When the horror is needed for the first time it will spawn it around 500M below the player to keep it in a idle state. When needed it will 'spawn' it by moving it closer and enabling its components. It is relatively simple right now as they are still in development!
+
+<h5 style="text-align: center;">Weather and Time Systems</h5>
+Weather and time is also a critical component of *The Bounty* as they directly
+relate to the atmosphere of the game. The weather and time system is still in
+development; however, fog and time is working currently.
+
+<p style="text-align: center;">**Fog**</p>
+The fog system has two separate types. One for dynamic height fog for culling
+and a local fog for hiding terrain. Each can be easily edited with data and
+spawned in by passing in a struct of variables. The dynamic height fog uses
+primary data assets to load in fog related to the events currently going on.
+Most likely the spawn director will tell this system to change the fog to be
+related to awareness. The local fog is a simple pooled fog system that loads and
+unloads fog at specific points in the world. This will be used by the spawn
+director to hide terrain that is spawned so the player can not see it be loaded!
+
+<figure class="gif-card">
+  <img src={`${import.meta.env.BASE_URL}/gifs/bounty-fog.gif`} alt="Fog" />
+  <figcaption>Depth Fog</figcaption>
+</figure>
+
+<p style="text-align: center;">**Time**</p>
+For the time system it is currently not data driven, but everything is set up to
+be data driven when that is implemented! It uses FTimespan to track the current
+day, hour, minute, and second that has passed since the world began. In the
+future this will drive the sky volume and change it based on current time adding
+to the atmosphere!
+
+<h5 style="text-align: center;">Water and Other Systems</h5>
+Water is something that also got updated during this sprint; however, is still
+deeply in development and will most likely take another couple sprints to get
+perfect. The things added this sprint for it was depth culling, reflections, and
+refraction for waves. These are still using temporary assets so they are not
+perfect; however, it is looking better than sprint one! I also added GPU
+instancing for the water that spawns the water in cells to render millions of
+tris without dropping a single frame!
+
+The other systems that were worked on included the compass which is a simple widget that tracks the player rotation and simulates compass like movement. Mostly everything else was related to making builds and implementation of models for everything!
+
+Overall, this sprint was a massive improvement over last sprint and I am happy to see the progress being made! Thank you for reading!
