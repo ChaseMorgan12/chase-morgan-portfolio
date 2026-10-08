@@ -1,0 +1,407 @@
+---
+title: "The Bounty Sprint 3"
+description: "Shop, Obstacles, and Navigation"
+pubDate: "Oct 08 2026"
+heroImage: "../../../assets/bounty-menu-navigation.gif"
+project: "the-bounty"
+---
+
+Sprint three has finished and with it came a complete loop for the game! Players can now start, finish, and restart the game according to the designer's specifications. I completed 14 points this sprint and tackled numerous systems core to our game. This sprint I was focused on getting the shop menus working, game navigation, audio subsystems, and obstacles.
+
+<h5 style="text-align: center;">Game Navigation</h5>
+The biggest thing worked on this sprint was the game navigation. Unlike many
+games, in *The Bounty* navigating the main menu combines both 3D elements with
+2D elements with certain diegetic elements sprinkled in. It makes the menu feel
+closer to a click and point adventure. When the player loads in they are met
+with the main menu including the play button, settings, and an exit prompt. If
+play is clicked it will send them to the actual menu which includes three
+separate in world options to go to the shops, select a bounty, or start hunting.
+This menu system comes equipped with the ability to show/hide 2D UI widgets,
+automatic fading, custom transitions, and full event hookup for custom behavior.
+It uses Unreal's FName for identifiers at runtime.
+
+```cpp
+void AMenuController::TransitionToMenuPawn(const FName& InName)
+{
+	if (!CurrentMenuPawn || bIsTransitioning) return;
+
+	if (AMenuPawn* TargetPawn = CurrentMenuPawn->GetNextPawn(InName))
+	{
+		bShowMouseCursor = false;
+		bEnableClickEvents = false;
+		bEnableMouseOverEvents = false;
+
+		bIsTransitioning = true;
+
+		AActor* TransitionActor = TargetPawn->GetTransitionActor();
+
+		SetViewTargetWithBlend(TransitionActor, TargetPawn->GetTransitionTime(), VTBlend_EaseInOut, 2.f);
+
+		if (TargetPawn->GetShouldFade() && PlayerCameraManager)
+		{
+			PlayerCameraManager->StartCameraFade(0.f, 1.f, TargetPawn->GetFadeInTime(), FLinearColor::Black, false, true);
+		}
+
+		if (!TargetPawn->GetWidgetClass())
+		{
+			//Skip to do this early to disable the UI automatically.
+			if (AMainMenuHUD* HUD = GetHUD<AMainMenuHUD>())
+			{
+				HUD->HandleNewPawnPossessed(Cast<AMenuPawn>(TargetPawn));
+			}
+		}
+
+		GetWorldTimerManager().ClearTimer(PossessionHandle);
+
+		GetWorldTimerManager().SetTimer(
+			PossessionHandle,
+			FTimerDelegate::CreateUObject(this, &AMenuController::PossessMenuPawn, MakeWeakObjectPtr(TargetPawn), TargetPawn->GetShouldFade()),
+			TargetPawn->GetTransitionTime(),
+			false
+		);
+	}
+}
+
+void AMenuController::TransitionBack()
+{
+	if (!CurrentMenuPawn || bIsTransitioning) return;
+
+	if (AMenuPawn* TargetPawn = CurrentMenuPawn->GetPreviousPawn())
+	{
+		bShowMouseCursor = false;
+		bEnableClickEvents = false;
+		bEnableMouseOverEvents = false;
+		bIsTransitioning = true;
+
+		if(CurrentMenuPawn->GetAllowFromTransitions())
+		{
+			SetViewTargetWithBlend(TargetPawn, TargetPawn->GetTransitionTime(), VTBlend_EaseInOut, 2.f);
+		}
+
+		if (CurrentMenuPawn->GetShouldFade() && PlayerCameraManager)
+		{
+			PlayerCameraManager->StartCameraFade(0.f, 1.f, CurrentMenuPawn->GetFadeInTime(), FLinearColor::Black, false, true);
+		}
+
+		if (!TargetPawn->GetWidgetClass())
+		{
+			//Skip to do this early to disable the UI automatically.
+			if (AMainMenuHUD* HUD = GetHUD<AMainMenuHUD>())
+			{
+				HUD->HandleNewPawnPossessed(Cast<AMenuPawn>(TargetPawn));
+			}
+		}
+
+		GetWorldTimerManager().ClearTimer(PossessionHandle);
+
+		GetWorldTimerManager().SetTimer(
+			PossessionHandle,
+			FTimerDelegate::CreateUObject(this, &AMenuController::PossessMenuPawn, MakeWeakObjectPtr(TargetPawn), CurrentMenuPawn->GetShouldFade()),
+			TargetPawn->GetTransitionTime(),
+			false
+		);
+	}
+}
+```
+
+<h6 style="text-align: center;">AMenuController Transition Code</h6>
+
+<p style="text-align: center;">
+  **Automatic 2D and 3D Bubble-Up Cascade-Down Logic**
+</p>
+Since the player can both be multi-layer deep in a 2D menu and a 3D path we need
+to rethink traditional menu navigation as that would tightly couple our 2D menus
+to our 3D scene. For this I created a two layer bubble-up system that looks
+through both the 2D menus and the 3D path to correctly navigate through menus.
+It starts by cascading down the 2D menus which then bubbles up notifying whether
+or not they handled it. Once this is done we cascade down the 3D path and bubble
+up back to the controller. If at any point a bubble-up delegate is fired we will
+pop it off of a theoretical stack and stop the bubble-up as it was handled. The
+system takes a simple architecture principle and applies it to a more advanced
+scenario. Under the hood the AMenuHUD acts as the main propagator holding an
+optimized map of the 2D elements so we have O(1) lookups, maximizing
+performance! All of this ensures we keep a standard flow downwards, a low level
+widget should not know anything about the hud or container.
+
+```cpp
+void AMenuController::OnBackPressed(const FInputActionValue& Value)
+{
+	if (bIsTransitioning) return;
+
+	if (AMainMenuHUD* HUD = GetHUD<AMainMenuHUD>())
+	{
+		HUD->HandleBackAction();
+	}
+}
+
+void AMainMenuHUD::HandleBackAction()
+{
+	if (GlobalWidgetContainer)
+	{
+		GlobalWidgetContainer->HandleBackAction();
+	}
+}
+
+void UGlobalContainerWidget::HandleBackAction()
+{
+	if (!ContainerSwitcher) return;
+
+	if (ContainerCanvas->GetVisibility() == ESlateVisibility::Collapsed)
+	{
+		HandleChildBackRequested();
+		return;
+	}
+
+	if (UContainerWidget* ActiveWidget = Cast<UContainerWidget>(ContainerSwitcher->GetActiveWidget()))
+	{
+		ActiveWidget->HandleBackAction();
+	}
+}
+
+void UContainerWidget::HandleBackAction()
+{
+	if (WidgetStack.Num() > 1)
+	{
+		int32 PreviousIndex = WidgetStack.Pop();
+
+		if (!PanelSwitcher) return;
+
+		if (UContainerPanelWidget* FromWidget = Cast<UContainerPanelWidget>(PanelSwitcher->GetActiveWidget()))
+		{
+			FromWidget->NativeOnDisable();
+			FromWidget->OnBackRequested.Unbind();
+		}
+
+		PanelSwitcher->SetActiveWidgetIndex(PreviousIndex);
+
+		if (UContainerPanelWidget* ToWidget = Cast<UContainerPanelWidget>(PanelSwitcher->GetActiveWidget()))
+		{
+			ToWidget->NativeOnEnable();
+			ToWidget->OnBackRequested.BindUObject(this, &UContainerWidget::HandleBackAction);
+		}
+
+		return;
+	}
+
+	OnBackRequested.Broadcast();
+}
+
+```
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/bounty-menu-navigation.gif`}
+    alt="Menu"
+  />
+  <figcaption>Menu Navigation</figcaption>
+</figure>
+
+<p style="text-align: center;">**Dynamic Popups**</p>
+One thing that I always do once in every game I play is accidentally misclick a
+button that should be gated behind a confirm popup. Whether that is a quit
+button, or even worse a purchase button, I dislike accidentally entering menus
+or doing things unintentionally. For *The Bounty* I already had it happen to me
+multiple times while testing, so I came up with a solution. I added a built-in
+popup system to the player's HUD actor. It works by keeping a min heap of all
+current scheduled popups. If a popup is needed you call this code:
+
+```cpp
+AHUDBase::CreatePopup(const FPopupInfo& InInfo);
+```
+
+This creates and displays a popup to the screen as simple as that! FPopupInfo is a struct that contains the general information for that popup. Here is the elements for that:
+
+```cpp
+USTRUCT(BlueprintType)
+struct BOUNTY_API FPopupButtonInfo
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FText Title = INVTEXT("Button Title");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FPopupDelegate OnClicked;
+};
+
+USTRUCT(BlueprintType)
+struct BOUNTY_API FPopupInfo
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FName Identifier = FName(TEXT("Popup Title"));
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 Priority = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FText Title = INVTEXT("Popup Title");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FText Description = INVTEXT("Popup Description");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TArray<FPopupButtonInfo> PopupButtons;
+
+	FPopupDelegate OnClosed;
+
+	FORCEINLINE bool operator<(const FPopupInfo& Other) const
+	{
+		return Priority < Other.Priority;
+	}
+
+	static FPopupInfo ConfirmPopup(const FName& Identifier, const FText& Description, const FPopupDelegate& ConfirmDelegate)
+	{
+		FPopupInfo NewInfo;
+		NewInfo.Title = INVTEXT("Are You Sure?");
+		NewInfo.Description = Description;
+		NewInfo.Identifier = Identifier;
+		NewInfo.Priority = 0;
+		FPopupButtonInfo ConfirmInfo;
+		ConfirmInfo.Title = INVTEXT("Confirm");
+		ConfirmInfo.OnClicked = ConfirmDelegate;
+		NewInfo.PopupButtons.Add(ConfirmInfo);
+		return NewInfo;
+	}
+};
+```
+
+This struct keeps the general data for the popup that will display when invoked. It even includes a default popup for a confirmation if you didn't want to create a new popup info struct. This does have the caveat of not supporting text localization; however, for our purposes that is fine and could be added later if necessary. Special consideration has also been made for blueprints as that is the most likely injection point. The system is world bound and the class for the popup can be changed if needed!
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/bounty-popups.gif`}
+    alt="Blueprint Popup"
+  />
+  <figcaption>Popups</figcaption>
+</figure>
+
+<p style="text-align: center;">**Shop Menus**</p>
+The shop menus utilize Unreal's built-in ListView widgets to display an
+optimized list of elements from a given UObject array. It pulls from a generic
+data table for each type of shop and displays each row using a generic UObject
+wrapper class to display a struct. All shop items utilize the Unreal Gameplay
+Ability System (GAS) for quick and easy gameplay effects without needing to
+balloon the project with classes or blueprints. The designer will create a data
+table, populate it with their items and assign it to a shop menu. It is that
+easy! This is the code:
+
+```cpp
+void UShopListEntry::NativeOnListItemObjectSet(UObject* ListItemObject)
+{
+	if (UTableRowWrapper* Wrapper = Cast<UTableRowWrapper>(ListItemObject))
+	{
+        if (Wrapper->SourceTable.IsValid())
+        {
+            FUpgradeRow* Row = Wrapper->SourceTable->FindRow<FUpgradeRow>(Wrapper->RowName, TEXT("Upgrade"));
+
+            if (Row)
+            {
+                if (NameTextBlock) NameTextBlock->SetText(Row->DisplayName);
+                if (DescriptionTextBlock) DescriptionTextBlock->SetText(Row->Description);
+
+                FNumberFormattingOptions Options;
+                Options.MaximumFractionalDigits = 0;
+                Options.MinimumFractionalDigits = 0;
+
+                if (CostTextBlock) CostTextBlock->SetText(FText::AsCurrency(Row->Cost, TEXT("USD"), &Options));
+                if (IconImage) IconImage->SetBrushFromSoftTexture(Row->Icon);
+            }
+        }
+	}
+}
+```
+
+<p style="text-align: center;">**End Game**</p>
+Starting with this sprint you can finally kill the bounty and head back to the
+main menu! How it works is fairly simple, the spawn director has a delegate that
+fires when the horror/bounty is killed. The AMainHUD subscribes to this event
+and will create the win screen which looks at the world's bounty data and
+displays it! It shows the bounty and has built-in animations just in case we
+need to add them later!
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/bounty-win.gif`}
+    alt="Bounty Killed"
+  />
+  <figcaption>Bounty Killed Menu</figcaption>
+</figure>
+
+<h5 style="text-align: center;">Obstacles</h5>
+This sprint included the completion of two of our obstacles. One being the
+whirlpool, and another as the oil slicks. The oil slicks are very simple and
+just disable any drag on the player's boat when overlapping causes the player to
+lose friction until moving out of the area. The whirlpool on the other hand uses
+an algorithm to simulate realistic whirlpools when the player is in the area!
+
+<p style="text-align: center;">**Whirlpools**</p>
+Whirlpools surprisingly (or not) cost a lot to calculate as they are heavy
+physics objects. To get around this I used the [Rankine
+Vortex](https://en.wikipedia.org/wiki/Rankine_vortex) algorithm with a few
+adjustments, of which the most notable being translating it to a 3D vector
+space. Here is what that looks like in practice!
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/bounty-whirlpools.gif`}
+    alt="Whirlpools"
+  />
+  <figcaption>Rankine Vortex Algorithm</figcaption>
+</figure>
+
+<h5 style="text-align: center;">Audio Subsystems</h5>
+The last thing (other than building or bug fixes) was setting up our audio
+subsystem. In previous versions of Unreal (until around 5.4) you needed to use
+sound classes to link the new audio system; however, that is different now and
+sound classes can be bypassed with the audio modulation plugin bringing a more
+modern audio approach to game development. For *The Bounty* we are using the
+newest that Unreal has to offer so we are using the new audio systems!
+
+The new system requires sound submixes which act as the main audio bus, control buses which act as parameters to be edited from C++, and a control bus mix which mixes the control buses. This way allows us to make the volume controllable via C++ or blueprints for audio settings. I also made a audio subsystem that automatically maps these parameters to channel names allowing easy value setting!
+
+```cpp
+void UAudioSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	const UAudioSubystemSettings* AudioSettings = GetDefault<UAudioSubystemSettings>();
+
+	if (AudioSettings)
+	{
+		GameVolumeMix = AudioSettings->DefaultVolumeMix.LoadSynchronous();
+
+		for (const auto& KVP : AudioSettings->DefaultBuses)
+		{
+			if (KVP.Value.IsNull()) continue;
+
+			ControlBusMap.Emplace(KVP.Key, KVP.Value.LoadSynchronous());
+		}
+	}
+
+	if (GameVolumeMix)
+	{
+		UAudioModulationStatics::ActivateBusMix(GetWorld(), GameVolumeMix);
+	}
+}
+
+void UAudioSubsystem::SetVolumeChannel(const FName& ChannelName, float Value)
+{
+	if (!GameVolumeMix) return;
+
+	TObjectPtr<USoundControlBus>* TargetBusPtr = ControlBusMap.Find(ChannelName);
+
+	if (TargetBusPtr && *TargetBusPtr)
+	{
+		FSoundControlBusMixStage MixStage;
+		MixStage.Bus = *TargetBusPtr;
+		MixStage.Value.TargetValue = FMath::Clamp(Value, 0.0f, 1.0f);
+
+		UAudioModulationStatics::UpdateMix(GetWorld(), GameVolumeMix, { MixStage });
+	}
+}
+```
+
+Overall, this sprint was great and I cannot wait until next sprint. The next sprint I will be focusing more on implementing the shop item effects, and finalizing the water shader with a new method learned through my ongoing research! Thank you for reading!
