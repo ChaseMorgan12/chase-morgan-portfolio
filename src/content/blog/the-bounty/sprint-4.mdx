@@ -1,0 +1,368 @@
+---
+title: "The Bounty Sprint 4"
+description: "Implementation Time"
+pubDate: "Oct 22 2026"
+heroImage: "../../../assets/bounty-new-water.gif"
+project: "the-bounty"
+---
+
+Sprint four is over and with it came our alpha build! This sprint I completed around 20 points worth of work which is a new record for this project and I am really happy with the results! A lot of this sprint was spent on implementation of secondary features and quality of life.
+
+<h5 style="text-align: center;">Movement Tweaks</h5>
+During playtests our designer found that movement felt a bit off as the ship was
+a bit too slow for both the rotation and movement speed. Luckily, I thought of
+this issue ahead of time and made all the systems data driven and exposed via
+data assets in the content browser. It was as easy as changing a few values, and
+bam! More responsive movement immediately! Funnily enough, we had actually
+decreased speed at the start as it was too much at one point in time. The speed
+was so fast that drifting became a super fun way of traversal!
+
+<h5 style="text-align: center;">Other Ship Tweaks</h5>
+There were a few other ship tweaks this sprint related to buoyancy, autopilot,
+and lights. For buoyancy a system was made to make sure the boat does not stray
+too far off its original pitch and roll rotation leading to the boat flipping
+softlocking the player. If the system detects the boat attempting to flip it
+will force all physics to not push that axis any further leading to it safely
+centering itself.
+
+Autopilot is actually a really cool feature that was wanted from the start and allows the player to keep moving while attacking a bounty. The main premise is that when they hold forward while exiting the cabin it auto-engages and keeps going forward until they enter the cabin again. It only works in the forward direction to still incentivize controlling the ship if they steer too far off coarse. It is fully editable and has a separate speed value if the designer wants the speed to be equal, greater, or less than the normal speed!
+
+Lights was a late addition to this sprint, and was added to combat the darkness brought on by the new day/night cycle. It is toggled by using 'T' or 'RS' and defaults to off at runtime. It is a very simple system that exposes a USceneComponent to a blueprint to place all toggleable light components in and binds them at runtime. The reason for this is that Unreal does not allow binding via object with components in blueprints.
+
+<h5 style="text-align: center;">Day/Night Cycle</h5>
+The day/night cycle was another huge addition to this game during the sprint. A
+lot of time was spent making the transitions look as natural as possible. The
+way it works is that the world time subsystem that handles just general time
+spawns a time actor to handle the visuals of day/night. It takes two directional
+light components and sets them to opposite sides of each other and rotates them
+based on the current time. It is offset by six hours so that day can start at
+6:00 AM and not 12:00 AM. The transition from day to night and vice versa is at
+6:00 PM and 6:00 AM respectively.
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/bounty-day-night-cycle.gif`}
+    alt="Day Night Cycle"
+  />
+  <figcaption>Day and Night</figcaption>
+</figure>
+
+When the clock hits a transition from day to night or night to day it will invoke a function telling the skybox to gradually change according to the time scale of the system. This is of course all data driven and editable in a data asset. It is a custom shader that takes the built in atmosphere and combines it with a custom HDRI for the night and day. This method allows for the sky to have celestial bodies like the moon or sun present with a custom skybox! The shader exposes an scalar parameter for the alpha blend between day and night. When a transition happens this parameter is changed accordingly to the speed set in the data asset. Utilizing Unreal's built-in sky index system allows for quick and easy implementation!
+
+```cpp
+void ATimeActor::BeginDay()
+{
+	SkyboxAlphaGoal = 0.f;
+}
+
+void ATimeActor::BeginNight()
+{
+	SkyboxAlphaGoal = 1.f;
+}
+
+void ATimeActor::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (!SkyboxComponent || !SkyboxComponent->GetMaterial(0)) return;
+
+	SkyboxMaterial = UMaterialInstanceDynamic::Create(SkyboxComponent->GetMaterial(0), this);
+
+	if (SkyboxMaterial)
+	{
+		SkyboxComponent->SetMaterial(0, SkyboxMaterial);
+
+		SkyboxMaterial->SetScalarParameterValue(FName("SkyboxAlpha"), 0.f);
+	}
+}
+
+void ATimeActor::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (SkyboxMaterial && !FMath::IsNearlyEqual(CurrentSkyboxAlpha, SkyboxAlphaGoal))
+	{
+		CurrentSkyboxAlpha = FMath::FInterpConstantTo(CurrentSkyboxAlpha, SkyboxAlphaGoal, DeltaTime, SkyboxLerpSpeed);
+		SkyboxMaterial->SetScalarParameterValue(FName("SkyboxAlpha"), CurrentSkyboxAlpha);
+	}
+}
+
+void ATimeActor::SetTime(const FTimespan& InTime)
+{
+	constexpr float MinutesInDay = 1440.f;
+
+	const float DayPercent = FMath::Fmod(InTime.GetTotalMinutes() / MinutesInDay, 1.0f);
+
+	const float SunPitch = -((DayPercent * 360.f) - 90.f);
+	const float MoonPitch = SunPitch + 180.f;
+
+	if (SunLightComponent)
+	{
+		const FRotator SunRotation = FRotator(FRotator::NormalizeAxis(SunPitch), -90.f, 0.f);
+
+		SunLightComponent->SetWorldRotation(SunRotation);
+	}
+
+	if (MoonLightComponent)
+	{
+		const FRotator MoonRotation = FRotator(FRotator::NormalizeAxis(MoonPitch), -90.f, 0.f);
+
+		MoonLightComponent->SetWorldRotation(MoonRotation);
+	}
+
+	const bool bIsSunOut = (DayPercent >= 0.245f && DayPercent < 0.75f);
+
+	if (!bIsDay.IsSet() || bIsDay.GetValue() != bIsSunOut)
+	{
+		bIsDay = bIsSunOut;
+
+		if (bIsDay.GetValue())
+		{
+			BeginDay();
+		}
+		else
+		{
+			BeginNight();
+		}
+	}
+}
+```
+
+<h5 style="text-align: center;">New and Improved Water</h5>
+Water went under a huge rework during this sprint. The water before worked but
+it was just never going to cut it so we went back to the drawing board. I tried
+numerous methods all centered around the same Gerstner wave function; however, I
+just couldn't get it looking right. However, doing more research I found out
+that Unreal's water plugin actually exposes all of its shaders. I decided to use
+that as a base for the new water system which also includes all the benefits of
+Unreal's lighting and buoyancy optimizations. What I added to the water was a
+custom water foam solution which isn't visible yet as it still needs some work,
+but I also added a custom subsurface scattering similar to how Sea of Thieves
+does it. I also created a new waves asset to create waves that mimic Sea of
+Thieves alongside making various levels like calm or aggressive. Overall, I
+think that it looks a lot better and I cannot wait to see where it takes us next
+sprint!
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/bounty-new-water.gif`}
+    alt="New Water System"
+  />
+  <figcaption>New Water</figcaption>
+</figure>
+
+<h5 style="text-align: center;">Quality of Life</h5>A lot of time this sprint
+was spent working on quality of life improvements. This includes stuff like the
+dynamic input glyph system, controller support, pausing and quitting, bounty
+selection tutorials, and better menu hitboxes.
+
+The dynamic input glyph system was made to help widgets display keyboard and controller glyphs to the user. It is a player subsystem that keeps a data table list of actions and what glyph that action it is associated with. When a widget needs an image it will basically request the soft texture for an input action either by name or action asset directly. The data table itself is not action bound and instead name bound in order to save on memory. For this system I made two base widgets that help make displaying these actions super simple. One is a direct input action widget that is used to display one input action in pop up form. This is very good for context menus to give the player information about what to click. The other is a rich text block that uses formatting to place the actions directly within text!
+
+```cpp
+//Input Glyph Subsystem
+
+void UInputGlyphSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+
+    if (const UInputGlyphSubsystemSettings* Settings = GetDefault<UInputGlyphSubsystemSettings>())
+    {
+        if (Settings->GlyphDataTable.IsNull()) return;
+
+        GlyphDataTable = Settings->GlyphDataTable.LoadSynchronous();
+    }
+}
+
+TSoftObjectPtr<UTexture2D> UInputGlyphSubsystem::GetGlyphForAction(const UInputAction* InputAction, bool bIsGamepad) const
+{
+    if (!InputAction || !GlyphDataTable) return nullptr;
+
+    FName RowName = InputAction->GetFName();
+
+    return GetGlyphForActionByName(RowName, bIsGamepad);
+}
+
+TSoftObjectPtr<UTexture2D> UInputGlyphSubsystem::GetGlyphForActionByName(const FName& Name, bool bIsGamepad) const
+{
+    if (!GlyphDataTable) return nullptr;
+
+    if (FInputActionGlyphRow* Row = GlyphDataTable->FindRow<FInputActionGlyphRow>(Name, TEXT("Glyph")))
+    {
+        return bIsGamepad ? Row->GamepadIcon : Row->KeyboardIcon;
+    }
+
+    return nullptr;
+}
+
+void UInputGlyphSubsystem::HandleInputDeviceChanged(bool bIsGamepad)
+{
+    bIsGamepadActive = bIsGamepad;
+    OnInputDeviceChanged.Broadcast(bIsGamepad);
+}
+
+bool UInputGlyphSubsystem::GetIsGamepadActive() const
+{
+    return bIsGamepadActive;
+}
+
+void UInputActionRichTextDecorator::HandleControlSchemeChanged(bool bIsGamepad)
+{
+	if (OwnerWidget)
+	{
+		BrushCache.Empty();
+
+		OwnerWidget->RefreshTextLayout();
+	}
+}
+
+//Rich Text Widget
+
+const FSlateBrush* UInputActionRichTextDecorator::FindImageBrush(FName TagName, bool bWarnIfMissing)
+{
+	UTexture2D* CorrectTexture = nullptr;
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (UInputGlyphSubsystem* Subsystem = GI->GetSubsystem<UInputGlyphSubsystem>())
+			{
+				CorrectTexture = Subsystem->GetGlyphForActionByName(TagName, Subsystem->GetIsGamepadActive()).LoadSynchronous();
+			}
+		}
+	}
+
+	if (CorrectTexture)
+	{
+		FSlateBrush& TargetBrush = BrushCache.FindOrAdd(TagName);
+
+		TargetBrush.SetResourceObject(CorrectTexture);
+
+		float TargetImageHeight = 32.0f;
+		if (URichTextBlock* Widget = Cast<URichTextBlock>(GetOuter()))
+		{
+			if (UDataTable* StyleTable = Widget->GetTextStyleSet())
+			{
+				if (FRichTextStyleRow* DefaultStyleRow = StyleTable->FindRow<FRichTextStyleRow>(TEXT("Default"), TEXT("FontSize")))
+				{
+					if (DefaultStyleRow->TextStyle.Font.Size > 0)
+					{
+						TargetImageHeight = static_cast<float>(DefaultStyleRow->TextStyle.Font.Size) * 2;
+					}
+				}
+			}
+		}
+
+		TargetBrush.ImageSize = FVector2D(TargetImageHeight, TargetImageHeight);
+
+		return &TargetBrush;
+	}
+
+	return Super::FindImageBrush(TagName, bWarnIfMissing);
+}
+
+TSharedPtr<class ITextDecorator> UInputActionRichTextDecorator::CreateDecorator(URichTextBlock* InOwner)
+{
+	OwnerWidget = InOwner;
+
+	if (OwnerWidget && OwnerWidget->GetWorld())
+	{
+		if (UGameInstance* GI = OwnerWidget->GetWorld()->GetGameInstance())
+		{
+			if (UInputGlyphSubsystem* Subsystem = GI->GetSubsystem<UInputGlyphSubsystem>())
+			{
+				Subsystem->OnInputDeviceChanged.RemoveAll(this);
+				Subsystem->OnInputDeviceChanged.AddDynamic(this, &UInputActionRichTextDecorator::HandleControlSchemeChanged);
+			}
+		}
+	}
+
+	return Super::CreateDecorator(InOwner);
+}
+```
+
+Another quality of life feature added was controller input. This was a quick and easy one as it is just remapping the already made mapping contexts to support controller inputs as well as keyboard. Pausing and quitting was another great addition that took a little time just because of how I implemented it. The pause menu is super easy and is just a simple toggle for on/off; however, for resuming I wanted to keep widget logic on the widget itself. That is difficult because toggling the menu on/off is handled through the player controller. For this I decided to make a custom bubble up system that starts at a child widget, and finishes at the hud. It uses a map of a FGameplayTag and TFunction to keep everything type-safe. It can be started at any level of the chain and keeps the coupling down and not up.
+
+<figure class="gif-card">
+  <img
+    src={`${import.meta.env.BASE_URL}/gifs/bounty-pause.gif`}
+    alt="Pausing and Quitting"
+  />
+  <figcaption>Pausing</figcaption>
+</figure>
+
+```cpp
+void UContainerWidget::NativeOnInitialized()
+{
+	Super::NativeOnInitialized();
+
+	if (WidgetTree)
+	{
+		WidgetTree->ForEachWidget([this](UWidget* Widget)
+			{
+				if (UContainerPanelWidget* PanelWidget = Cast<UContainerPanelWidget>(Widget))
+				{
+					AddChildWidgetBubbleUp(PanelWidget);
+				}
+			});
+	}
+}
+
+void UContainerWidget::RequestBubbleUp(const FBubbleUpEventInfo& InInfo)
+{
+	if (!InInfo.EventTag.IsValid()) return;
+
+	OnBubbleUpRequested.ExecuteIfBound(InInfo);
+}
+
+void UContainerWidget::HandleBubbleUp(const FBubbleUpEventInfo& InInfo)
+{
+	bool bHandled = false;
+
+	const FGameplayTag& EventTag = InInfo.EventTag;
+
+	if (const TFunction<bool(const FBubbleUpEventInfo&)>* FoundPredicate = BubblePredicateMap.Find(EventTag))
+	{
+		if (*FoundPredicate)
+		{
+			bHandled = (*FoundPredicate)(InInfo);
+		}
+	}
+
+	if (!bHandled)
+	{
+		RequestBubbleUp(InInfo);
+	}
+}
+
+void UContainerWidget::AddBubbleUpFunction(const FGameplayTag& Tag, TFunction<bool(const FBubbleUpEventInfo&)> Function)
+{
+	if (!Tag.IsValid() || !Function) return;
+
+	if (BubblePredicateMap.Contains(Tag)) return;
+
+	BubblePredicateMap.Add(Tag, MoveTemp(Function));
+}
+
+void UContainerWidget::RemoveBubbleUpFunction(const FGameplayTag& Tag)
+{
+	if (Tag.IsValid())
+	{
+		BubblePredicateMap.Remove(Tag);
+	}
+}
+
+void UContainerWidget::AddChildWidgetBubbleUp(UContainerPanelWidget* Widget)
+{
+	if (!Widget) return;
+
+	Widget->OnBubbleUpRequested.BindUObject(this, &UContainerWidget::HandleBubbleUp);
+}
+```
+
+Bounty selection tutorial and the better menu hitboxes were both easy additions to the main menu for the game. The bounty selection tutorial is just a simple 3D widget on the bounty board along with a 2D widget on the screen giving you simple directions. The better menu hitboxes are just adjustments made to the actual hitboxes themselves along with removing the boat tied hitbox and making it static.
+
+<h5 style="text-align: center;">Other Work</h5>
+Other work this sprint included making the alpha build which included combining
+all current assets and fixing any bugs that came with that. Overall, this sprint
+went very well and I cannot wait for the last three sprints! Thanks for reading!
