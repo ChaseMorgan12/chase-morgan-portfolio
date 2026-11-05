@@ -1,0 +1,378 @@
+---
+title: "The Bounty Sprint 5"
+description: "GAS and UI"
+pubDate: "Nov 5 2026"
+heroImage: "../../../assets/bounty-ship-sink.gif"
+project: "the-bounty"
+---
+
+Sprint five is over and with it came a lot of improvements to the game as a whole! This sprint was a little light on the card/point department; however, in terms of the actual work, each card/point was a bit more dense instead. My total point count was 17 and a lot of it was related to implementing GAS and implementing new UI systems/processes.
+
+<h5 style="text-align: center;">Unreal GAS</h5>
+The Unreal [Gameplay Ability
+System](https://dev.epicgames.com/documentation/unreal-engine/gameplay-ability-system-for-unreal-engine?lang=en-US)
+(GAS) is a system that allows designers to define quick and easy unique effects
+that can be applied to anything that has an ability system component attached.
+For *The Bounty* this is the basis for the upgrade system. Each upgrade that a
+player buys from the shop will directly apply an ability to either the player or
+the horror when it spawns in. Then when the upgrades specified trigger tag goes
+off it will apply the effect to the ability system component.
+
+The issue with Unreal GAS is that its syntax is incredibly dense and the architecture surrounding it is more geared towards multiplayer games rather than singleplayer games and its API reflects this. A lot of its inner workings is kind of a black box where it just kind of works and doesn't tell you why. The basics is that you define a UAttributeSet that contains the actor's attributes like health, armor, damage etc. For this game we replace health with incoming damage due to a limitation found that would be a waste of time to actually fix. You then in the actor you inherit from IAbilitySystemInterface which tells GAS that it will be tied to the system. This requires you to define the attribute set you are using and a couple extra functions for getters. The syntax is as follows:
+
+```cpp
+UCLASS()
+class BOUNTY_API UHorrorAttributeSet : public UAttributeSet
+{
+	GENERATED_BODY()
+protected:
+	UPROPERTY(BlueprintReadOnly)
+	FGameplayAttributeData IncomingDamage;
+
+public:
+	GAMEPLAYATTRIBUTE_PROPERTY_GETTER(UHorrorAttributeSet, IncomingDamage);
+	GAMEPLAYATTRIBUTE_VALUE_GETTER(IncomingDamage);
+	GAMEPLAYATTRIBUTE_VALUE_SETTER(IncomingDamage);
+	GAMEPLAYATTRIBUTE_VALUE_INITTER(IncomingDamage);
+
+	void PostGameplayEffectExecute(const struct FGameplayEffectModCallbackData& Data) override;
+};
+
+void UHorrorAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallbackData& Data)
+{
+	Super::PostGameplayEffectExecute(Data);
+
+	//Intercept the incoming damage effect to apply it as damage to the horror.
+	if (Data.EvaluatedData.Attribute == GetIncomingDamageAttribute())
+	{
+		const float RawDamage = GetIncomingDamage();
+
+		SetIncomingDamage(0.f);
+
+		if (RawDamage > 0.f)
+		{
+            AActor* TargetActor = Data.Target.GetAvatarActor();
+
+            AHorror* Horror = Cast<AHorror>(TargetActor);
+
+            if (Horror)
+            {
+                FGameplayEffectContextHandle Context = Data.EffectSpec.GetEffectContext();
+
+                Horror->ApplyDamage(
+                    RawDamage,
+                    Cast<AController>(Context.GetOriginalInstigator()),
+                    Context.GetEffectCauser()
+                );
+            }
+		}
+	}
+}
+```
+
+This is an example of the attribute set for the horror. Notice that I check specifically for the incoming damage attribute in the post execute function. This is related to the limitation that I was talking about with the damage. Our systems relied on AActor::TakeDamage which completely bypasses Unreal GAS and the ways to get it working would have just wasted more time then it is worth. To remedy this I made a custom AHorror::ApplyDamage that takes damage from GAS and applies it to directly to AActor::TakeDamage so the gap is filled.
+
+The other part of this system is the effects and abilities! Effects are just simple data-only blueprints that directly effect attributes on the actor itself. Abilities are a bit less straightforward. Abilties when defined will take the context and apply the valid effects to the ability system component directly. For example in our game weapons fire projectiles which themselves have effects. For this we need a custom ability that gets the weapon that was fired and applies to effects that the weapon had. The reason for this, is that GAS doesn't know which weapon has which effect. All it knows is that the horror has these abilities and is just waiting for effects to be applied. This is roughly the syntax for that:
+
+```cpp
+void UGameplayAbility_Weapon::ActivateAbility(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayAbilityActivationInfo ActivationInfo,
+	const FGameplayEventData* TriggerEventData)
+{
+	Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
+
+	if (!TriggerEventData || !GetWorld()) return;
+
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo();
+	const ABaseWeapon* Weapon = Cast<ABaseWeapon>(TriggerEventData->OptionalObject);
+
+	UUpgradeSubsystem* Subsystem = GetWorld()->GetGameInstance()->GetSubsystem<UUpgradeSubsystem>();
+
+	if (ASC && Weapon && Subsystem)
+	{
+		for (const FGameplayTag& UpgradeTag : Weapon->GetWeaponData().AvailableUpgrades)
+		{
+			const FUpgradeAbility* Upgrade = Subsystem->GetUpgrade(UpgradeTag);
+
+			if (Upgrade && !Upgrade->GameplayEffect.IsNull())
+			{
+				UClass* EffectClass = Upgrade->GameplayEffect.Get();
+				if (EffectClass)
+				{
+					FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
+
+					AActor* NonConstWeapon = const_cast<ABaseWeapon*>(Weapon);
+					Context.AddInstigator(NonConstWeapon, const_cast<AActor*>(TriggerEventData->Instigator.Get()));
+					Context.AddSourceObject(NonConstWeapon);
+
+					FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(EffectClass, 1.0f, Context);
+
+					if (SpecHandle.IsValid())
+					{
+						ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
+					}
+				}
+			}
+		}
+	}
+
+	EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+}
+```
+
+This gets the weapon that instigated this ability and gets its effects that are owned by the player! Overall, this system is a bit convoluted; however, it is surprisingly similar to the item system I made for _Little Arthur_ back in spring 2026.
+
+<h5 style="text-align: center;">A Unified UI System</h5>
+This sprint a lot of time was spent redefining our UI systems to be as
+straightforward and decoupled as possible. In previous sprints I made a custom
+bubble up system, dynamic popups, and custom containers. This sprint I focused
+on adding simple and effective widget stacks for our gameplay HUD. Before we
+were just inheriting from my base container widget that I made for all widgets.
+It worked just fine; however, there was a big flaw with it, pressing back
+doesn't do anything. Now I could have just made a simple system to go back an
+element everything back was pressed. This works very well until you get to the
+more complex cases like pause menus. For pause menus you need to make sure to
+resume the game when the player presses back. To handle this I made a TMap with
+a widget class key and a TFunction value for this. When back is pressed it will
+fire any associated lamdas (or static functions as it meets TFunction
+requirements).
+
+For the pause menu I made a custom function that requests a bubble up to resume the game with a native gameplay tag. This came with the interesting issue however. If we fire this action before removing the widget it will crash the game. The reason? The resume event that was already defined also removes a widget from the stack. The result? an infinite recursion bug leading to a stack overflow. For this, we instead fire the function after the widget is removed which the logic will immediately return if the widget that is attempting to be removed isn't actually the active widget. Here is that code:
+
+```cpp
+void UHUDContainer::HandleToggleWidget(UWidget* Widget, bool bToggle)
+{
+	if (!Widget || !PanelSwitcher || !PanelSwitcher->HasChild(Widget)) return;
+
+	const int32 WidgetIndex = PanelSwitcher->GetChildIndex(Widget);
+
+	const int32 Index = bToggle ? WidgetIndex : -1;
+
+	if (Index >= 0)
+	{
+		OnNavigationRequested(Index);
+	}
+	else
+	{
+		if (PanelSwitcher->GetActiveWidgetIndex() != WidgetIndex)
+		{
+			return;
+		}
+
+		HandleBackAction();
+	}
+}
+
+void UHUDContainer::NativeOnInitialized()
+{
+	Super::NativeOnInitialized();
+
+	TWeakObjectPtr<UHUDContainer> WeakThis(this);
+
+	if (PauseWidget)
+	{
+		const TFunction<void()> ExitPauseMenu = [WeakThis]() -> void
+			{
+				if (!WeakThis.IsValid()) return;
+
+				FBubbleUpEventInfo Info;
+
+				Info.EventTag = TAG_Event_UI_Resume;
+				Info.SourceWidget = WeakThis;
+
+				WeakThis.Get()->RequestBubbleUp(Info);
+			};
+
+		BackActionMap.Emplace(PauseWidget->GetClass(), ExitPauseMenu);
+	}
+}
+
+void UHUDContainer::TogglePauseMenu(bool bToggle)
+{
+	HandleToggleWidget(PauseWidget, bToggle);
+}
+
+void UHUDContainer::ToggleInventory(bool bToggle)
+{
+	HandleToggleWidget(InventoryWidget, bToggle);
+
+	if (ABountyPlayerState* PlayerState = GetOwningPlayerState<ABountyPlayerState>())
+	{
+		if (bToggle)
+		{
+			PlayerState->AddGameplayTag(TAG_State_Pause_Blocked);
+		}
+		else
+		{
+			PlayerState->RemoveGameplayTag(TAG_State_Pause_Blocked);
+		}
+	}
+}
+
+void UHUDContainer::HandleBackAction()
+{
+	if (PanelSwitcher)
+	{
+		UWidget* ActiveWidget = PanelSwitcher->GetActiveWidget();
+
+		if (!ActiveWidget) return;
+
+		if (WidgetStack.Num() == 2) //This means we are at the theoretical top of the stack minus the base element.
+		{
+			if (ABountyPlayerController* Controller = GetOwningPlayer<ABountyPlayerController>())
+			{
+				Controller->SetControllerInputMode(EInputMode::GameOnly);
+			}
+
+			if (ABountyPlayerState* PlayerState = GetOwningPlayerState<ABountyPlayerState>())
+			{
+				if (ActiveWidget != PauseWidget)
+				{
+					//We remove the block pause gameplay tag here because we should no longer be in a menu to block pausing.
+					PlayerState->RemoveGameplayTag(TAG_State_Pause_Blocked);
+				}
+			}
+		}
+
+		Super::HandleBackAction();
+
+		//Fire this after as to not accidentally trigger a stack overflow if the associated action also triggers a back action.
+		if (const TFunction<void()>* BackActionPtr = BackActionMap.Find(ActiveWidget->GetClass()))
+		{
+			if (*BackActionPtr)
+			{
+				(*BackActionPtr)();
+			}
+		}
+	}
+}
+```
+
+This system actually finished all the cards that related to back actions in the backlog at once and made our UI stack a lot simpler to edit and create unique behavior of!
+
+<h5 style="text-align: center;">Extra Fun!</h5>A lot of this sprint was actually
+spent implementing some extra fun features! We are very much ahead of schedule
+with our game and that means we can add these fun little things! The most fun
+item created, was actually created in secret a few sprints ago when I was
+experimenting with Unreal Local CO-OP. Turns out our game is surprisingly well
+managed to the point where we can literally just add splitscreen with little to
+no issues. The only issues found were input glyphs improperly showing up and
+mounted weapons needed to check if they were mounted before allowing a player to
+mount.
+
+The other fun thing that was added this sprint was a nice little roman numeral counter that marks which boat the player is using. It uses an algorithm that generates a roman numeral from a 32 bit integer up to 3999. For this I made a stats subsystem that tracks all player statistics (for now, only deaths). I went a little overboard as well and made an entire serialization system that saves and initializes all subsystems that need save data automatically on load as well. The roman numerals actually signify the number boat the player is using which is just their amount of deaths plus one. Here is the code for that generator and the save system:
+
+```cpp
+FString AShipPawn::GetRomanNumeralFromInt(int32 Number)
+{
+	if (Number >= 4000 || Number <= 0) return FString::FromInt(Number);
+
+	constexpr int32 NUMERAL_COUNT = 13;
+	FString Numerals[] = { TEXT("M"), TEXT("CM"), TEXT("D"), TEXT("CD"), TEXT("C"), TEXT("XC"), TEXT("L"), TEXT("XL"), TEXT("X"), TEXT("IX"), TEXT("V"), TEXT("IV"), TEXT("I") };
+	int32 Numbers[] = { 1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1 };
+
+	FString RomanNumeral;
+
+	for (int32 Index = 0; Index < NUMERAL_COUNT; Index++)
+	{
+		while (Number >= Numbers[Index])
+		{
+			RomanNumeral.Append(Numerals[Index]);
+			Number -= Numbers[Index];
+		}
+	}
+
+	return RomanNumeral;
+}
+
+void USaveSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	//Load needed default saves
+	TriggerLoad(UStatsSaveGame::StaticClass(), TEXT("StatsSlot0"), 0);
+}
+
+void USaveSubsystem::RegisterSubsystem(TSubclassOf<USaveGame> SaveGameClass, TScriptInterface<ISerializeableSubsystem> Subsystem)
+{
+	if (!Subsystem.GetInterface() || !SaveGameClass) return;
+
+	if (FSaveGameRegistry* Registry = RegistryMap.Find(SaveGameClass->GetFName()))
+	{
+		Registry->RegisteredSubsystems.AddUnique(Subsystem);
+	}
+	else
+	{
+		FSaveGameRegistry NewRegistry;
+		NewRegistry.RegisteredSubsystems.AddUnique(Subsystem);
+
+		RegistryMap.Emplace(SaveGameClass->GetFName(), NewRegistry);
+	}
+}
+
+void USaveSubsystem::TriggerSave(TSubclassOf<USaveGame> SaveGameClass, const FName& SlotName, const int32 UserIndex)
+{
+	if (!SaveGameClass || SavingMap.FindOrAdd(SaveGameClass->GetFName())) return;
+
+	const FName SaveGameName = SaveGameClass->GetFName();
+	USaveGame* SaveGame = UGameplayStatics::CreateSaveGameObject(SaveGameClass);
+
+	if (FSaveGameRegistry* Registry = RegistryMap.Find(SaveGameName))
+	{
+		for (auto& Subsystem : Registry->RegisteredSubsystems)
+		{
+			if (!Subsystem.IsValid()) continue;
+
+			Subsystem->OnSaveDataRequested(SaveGame);
+		}
+	}
+
+	SavingMap[SaveGameName] = true;
+
+	FAsyncSaveGameToSlotDelegate SaveDelegate = FAsyncSaveGameToSlotDelegate::CreateWeakLambda(this,
+		[this, SaveGameName](const FString& SlotName, int32 UserIndex, bool bSuccess) -> void
+		{
+			if (SavingMap.Contains(SaveGameName))
+			{
+				SavingMap[SaveGameName] = false;
+			}
+		}
+	);
+
+	UGameplayStatics::AsyncSaveGameToSlot(SaveGame, SlotName.ToString(), UserIndex, SaveDelegate);
+}
+
+void USaveSubsystem::TriggerLoad(TSubclassOf<USaveGame> SaveGameClass, const FName& SlotName, const int32 UserIndex)
+{
+	if (!SaveGameClass) return;
+
+	const FName SaveGameName = SaveGameClass->GetFName();
+
+	FAsyncLoadGameFromSlotDelegate SaveDelegate = FAsyncLoadGameFromSlotDelegate::CreateWeakLambda(this,
+		[this, SaveGameName](const FString& SlotName, const int32 UserIndex, USaveGame* LoadedSave) -> void
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Save Loaded of type: %s"), *SaveGameName.ToString());
+			if (!LoadedSave) return;
+
+			if (FSaveGameRegistry* Registry = RegistryMap.Find(SaveGameName))
+			{
+				for (auto& Subsystem : Registry->RegisteredSubsystems)
+				{
+					if (!Subsystem.IsValid()) continue;
+
+					Subsystem->OnSaveDataLoaded(LoadedSave);
+				}
+			}
+
+			OnSaveGameLoaded.Broadcast(LoadedSave);
+		}
+	);
+
+	UGameplayStatics::AsyncLoadGameFromSlot(SlotName.ToString(), UserIndex, SaveDelegate);
+}
+
+```
+
+Overall, this sprint was a bit slower than the rest; however, we are ahead in terms of programming and it is nice to add some more fun things to the game! Hopefully, next sprint we will be fully feature complete! Thanks for reading!
