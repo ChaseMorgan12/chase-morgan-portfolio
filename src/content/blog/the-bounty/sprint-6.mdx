@@ -1,0 +1,390 @@
+---
+title: "The Bounty Sprint 6"
+description: "CO-OP, Music, and Tutorials"
+pubDate: "Nov 19 2026"
+heroImage: "../../../assets/bounty-updated-weather.gif"
+project: "the-bounty"
+---
+
+Sprint six is over with and with it came our beta build! This sprint I completed 14 cards totalling 16 points and focused mostly on full CO-OP integration, music, the tutorial, weather updates, and setting up the settings UI. This sprint was more about implementing the wants as we are basically done with all the needs for the game!
+
+<h5 style="text-align: center;">Currency</h5>
+This sprint started with integrating our current currency subsystem with our new
+save system. This was as simple as defining the UCurrencySubsystem as an
+ISerializeableSubsystem and then cleaning up some of the references that were
+already found. It also included adding the ability to buy and sell from the
+current shop system which was also incredibly simple.
+
+<h5 style="text-align: center;">CO-OP Integration</h5>
+Next up was full CO-OP integration! This was actually experimented with around
+Sprint three or four; however, it was mostly just for fun to test Unreal's local
+splitscreen CO-OP systems and to test how decoupled our systems are. Our
+designer loved it so much that now it is becoming a full feature and with that
+means it needs a *lot* of polish. I started with just implementing it back in by
+merging the branch it existed on onto dev. After that, I needed to fix all the
+bugs that were present from the original implementation. There were only a few
+which included: exiting to main menu would keep splitscreen active, all players
+could pause the game, and UI was not split up properly so every player had a
+compass and sonar widget.
+
+To fix the main menu bug, I defined a simple toggle on the game mode to mark it as an actual game map and if it isn't, disable the splitscreen viewport layout. Players should still be able to exist, but their screen shouldn't! Next up was fixing all players being able to pause the screen. This one was also simple, I defined a function in AHUDBase that determines whether or not this HUD is the primary player or not. If it is, allow for correct pause structure and resuming. If not, don't pause the game and instead show a menu where the player can leave or resume. The last bug came with a bit of trouble where all player HUDs were the same. To fix this I defined a shared hud widget that would be added directly to the viewport instead of each player screen. This widget contained the global pause menu, compass, sonar, ship health, and popups. To instantiate it I made tied to the primary player and for things that could be the shared or personal hud, I used a ternary operator to select the correct one without having to change much logic.
+
+Next for CO-OP was the ability to add and remove players. This took me fairly long because of how Unreal handles inputs. For removing players it is extremely simple, just bind to the input component on the new player waiting for that remove input, check if removing players is allowed (only in main menu and when paused) and remove them. Adding players is less simple as it requires binding to the viewport directly intercepting inputs before the game receives them. This allows us to determine the exact controller and user that pressed the button without doing a bunch of hoops. For player 3,4 it is as simple as just adding them; however, for player 2 it is less straightforward as we need to redirect the input mapping from player 1 to player 2 since player 1 also gets the first controller for controller play. I also added a widget that tracks this and lets the players know if they are connected. Alongside that, I added automatic detection for connection lost which will automatically rebind the player when that controller reconnects. Overall, CO-OP was really fun to work on, and because our systems are so well designed we can add it with little to no refactoring!
+
+```cpp
+bool UBountyGameViewportClient::InputKey(const FInputKeyEventArgs& EventArgs)
+{
+    if (!World || EventArgs.Event != IE_Pressed || !GameInstance || GameInstance->GetNumLocalPlayers() >= 4) return Super::InputKey(EventArgs);
+
+    IPlatformInputDeviceMapper& DeviceMapper = IPlatformInputDeviceMapper::Get();
+    const FPlatformUserId CurrentUser = DeviceMapper.GetUserForInputDevice(EventArgs.InputDevice);
+    const FInputDeviceId DeviceId = EventArgs.InputDevice;
+
+	if (bAllowPlayerJoin && EventArgs.Key == EKeys::Gamepad_Special_Left)
+	{
+        if (CurrentUser == DeviceMapper.GetPrimaryPlatformUser())
+        {
+            const FPlatformUserId NewUserId = DeviceMapper.AllocateNewUserId();
+
+            if (NewUserId.IsValid() && DeviceMapper.Internal_ChangeInputDeviceUserMapping(DeviceId, NewUserId, CurrentUser))
+            {
+                UE_LOG(LogTemp, Display, TEXT("Device %d paired to new Player ID: %d"), DeviceId.GetId(), NewUserId.GetInternalId());
+
+                World->GetTimerManager().SetTimerForNextTick([this, NewUserId, DeviceId]()
+                    {
+                        if (!GameInstance) return;
+
+                        if (UCoopSubsystem* CoopSubsystem = GameInstance->GetSubsystem<UCoopSubsystem>())
+                        {
+                            CoopSubsystem->TryJoinPlayer(NewUserId, DeviceId);
+                        }
+                    });
+                return true;
+            }
+        }
+        else if (CurrentUser.IsValid() && GEngine && GEngine->GetLocalPlayerFromPlatformUserId(World, CurrentUser) == nullptr)
+        {
+            UE_LOG(LogTemp, Display, TEXT("Device %d paired to new Player ID: %d"), DeviceId.GetId(), CurrentUser.GetInternalId());
+
+            World->GetTimerManager().SetTimerForNextTick([this, CurrentUser, DeviceId]()
+                {
+                    if (!GameInstance) return;
+
+                    if (UCoopSubsystem* CoopSubsystem = GameInstance->GetSubsystem<UCoopSubsystem>())
+                    {
+                        CoopSubsystem->TryJoinPlayer(CurrentUser, DeviceId);
+                    }
+                });
+            return true;
+        }
+	}
+
+	return Super::InputKey(EventArgs);
+}
+```
+
+<h5 style="text-align: center;">Music Integration</h5>
+Music integration is still in the works but the main audio assets have been
+imported alongside setting up the main menu and in-game calm music. They
+automatically bind to the audio subsystem that I made earlier in the project and
+are assigned to the music audio bus!
+
+<h5 style="text-align: center;">Weather Updates</h5>
+For weather I finally added actual weather actors that can spawn in weather
+events like rain and thunder! I also hooked into the water systems to allow for
+waves to be dynamically changed alongside weather; however, that system is still
+experimental and has a few visual bugs that will need to be fixed. For weather
+events I defined a custom actor that gets spawned when the weather changes.
+However, it is set up so that it will only spawn in a new one if the old one is
+different. Once it is spawned in, it will fire a function that will
+automatically lerp the alpha of the weather lerp time so any systems (including
+blueprints) can tap into it to smoothly transition weather!
+
+For the waves it included tapping into the waves by defining a custom waves actor that allows lerping of the wave assets that come with the wave system made by Unreal. It was a nightmare to set up as there is no documentation present for doing this and I had to look directly at source to figure this out. It also causes the visual bug of the water being reversed and sped up when lerping which will need to be evaluated before making this feature complete.
+
+```cpp
+GerstnerWaterWaveGeneratorSimple* ABountyWaterBody::LerpWaveGenerator(UGerstnerWaterWaveGeneratorSimple* Start, UGerstnerWaterWaveGeneratorSimple* Goal, float Alpha)
+{
+	if (!BlendWaveGenerator || !Start || !Goal) return nullptr;
+
+	BlendWaveGenerator->LargeWaveSteepness = FMath::Lerp(Start->LargeWaveSteepness, Goal->LargeWaveSteepness, Alpha);
+	BlendWaveGenerator->MaxAmplitude = FMath::Lerp(Start->MaxAmplitude, Goal->MaxAmplitude, Alpha);
+	BlendWaveGenerator->MaxWavelength = FMath::Lerp(Start->MaxWavelength, Goal->MaxWavelength, Alpha);
+	BlendWaveGenerator->MinAmplitude = FMath::Lerp(Start->MinAmplitude, Goal->MinAmplitude, Alpha);
+	BlendWaveGenerator->MinWavelength = FMath::Lerp(Start->MinWavelength, Goal->MinWavelength, Alpha);
+	BlendWaveGenerator->SmallWaveSteepness = FMath::Lerp(Start->SmallWaveSteepness, Goal->SmallWaveSteepness, Alpha);
+	return BlendWaveGenerator;
+}
+
+void ABountyWaterBody::SetWaveGeneratorInternal(UGerstnerWaterWaveGeneratorSimple* InWaveGenerator, float FoamHeight)
+{
+	if (!InWaveGenerator) return;
+
+	if (UGerstnerWaterWaves* GerstnerWaves = Cast<UGerstnerWaterWaves>(GetWaterWaves()))
+	{
+		GerstnerWaves->GerstnerWaveGenerator = InWaveGenerator;
+
+		if (UGerstnerWaterWaveGeneratorSimple* SimpleGenerator = Cast<UGerstnerWaterWaveGeneratorSimple>(GerstnerWaves->GerstnerWaveGenerator))
+		{
+			SimpleGenerator->LargeWaveSteepness = InWaveGenerator->LargeWaveSteepness;
+			SimpleGenerator->MaxAmplitude = InWaveGenerator->MaxAmplitude;
+			SimpleGenerator->MaxWavelength = InWaveGenerator->MaxWavelength;
+			SimpleGenerator->MinAmplitude = InWaveGenerator->MinAmplitude;
+			SimpleGenerator->MinWavelength = InWaveGenerator->MinWavelength;
+			SimpleGenerator->SmallWaveSteepness = InWaveGenerator->SmallWaveSteepness;
+		}
+
+		GerstnerWaves->RecomputeWaves(true);
+
+		if (UWaterBodyComponent* WaterComponent = GetWaterBodyComponent())
+		{
+			WaterComponent->UpdateWaterZones();
+			WaterComponent->MarkRenderStateDirty();
+		}
+	}
+
+	if (UMaterialInstanceDynamic* Material = GetWaterMaterialInstance())
+	{
+		Material->SetScalarParameterValue(FName("FoamHeightThreshold"), FoamHeight);
+		UE_LOG(LogTemp, Warning, TEXT("Setting Height: %f"), FoamHeight);
+	}
+}
+
+void ABountyWaterBody::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (UGerstnerWaterWaves* GerstnerWaves = Cast<UGerstnerWaterWaves>(GetWaterWaves()))
+	{
+		CurrentWaveGenerator = Cast<UGerstnerWaterWaveGeneratorSimple>(GerstnerWaves->GerstnerWaveGenerator);
+
+		if (CurrentWaveGenerator)
+		{
+			BlendWaveGenerator = DuplicateObject<UGerstnerWaterWaveGeneratorSimple>(CurrentWaveGenerator, this);
+		}
+	}
+
+	if (UMaterialInstanceDynamic* Material = GetWaterMaterialInstance())
+	{
+		Material->GetScalarParameterValue(FName("FoamHeightThreshold"), CurrentFoamHeight);
+	}
+}
+
+void ABountyWaterBody::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (!bIsChangingWaves) return;
+
+	if (CurrentBlendTime >= CurrentBlendDuration)
+	{
+		bIsChangingWaves = false;
+		CurrentBlendTime = 0.f;
+		CurrentBlendDuration = 0.f;
+		CurrentWaveGenerator = GoalWaveGenerator;
+		CurrentFoamHeight = GoalFoamHeight;
+		SetWaveGeneratorInternal(GoalWaveGenerator, GoalFoamHeight);
+		return;
+	}
+
+	CurrentBlendTime += DeltaTime;
+
+	const float Alpha = CurrentBlendTime / CurrentBlendDuration;
+	const float FoamHeight = FMath::Lerp(CurrentFoamHeight, GoalFoamHeight, Alpha);
+
+	SetWaveGeneratorInternal(LerpWaveGenerator(CurrentWaveGenerator, GoalWaveGenerator, Alpha), FoamHeight);
+}
+```
+
+<h5 style="text-align: center;">Tutorial</h5>
+The tutorial combines gameplay tags with custom made delegates to teach the
+player how to play the game! For this I defined custom structs that contain info
+for each tutorial that can also lock the player into doing a specific action if
+needed. This is very useful for having the player familiarize themselves with
+the general input. Another custom struct was made for actually displaying all of
+the information to the screen and using the rich text blocks I made earlier made
+this super simple to do!
+
+```cpp
+void UTutorialSubsystem::SetTutorialDataAsset(const UTutorialDataAsset* DataAsset)
+{
+    if (!DataAsset) return;
+
+    TArray<FTutorialStateInfo> TutorialStates;
+    DataAsset->GetTutorialStates(TutorialStates);
+
+    CachedTutorialDataAsset = DataAsset;
+
+    TWeakObjectPtr<UTutorialSubsystem> WeakThis{this};
+
+    ShipPawn = Cast<AShipPawn>(UGameplayStatics::GetActorOfClass(GetWorld(), AShipPawn::StaticClass()));
+    ABountyPlayerController* PlayerController = GetWorld()->GetFirstPlayerController<ABountyPlayerController>();
+    ABountyHunter* BountyHunter = PlayerController ? PlayerController->GetBountyHunter() : nullptr;
+
+    for (const FTutorialStateInfo& State : TutorialStates)
+    {
+        if (TutorialStateMap.Contains(State.Tag)) continue;
+
+        TutorialStateMap.Emplace(State.Tag, State);
+
+        for (const FRequiredTutorialInput& RequiredInput : State.RequiredInput)
+        {
+            if (!RequiredInputMap.Contains(RequiredInput.InputAction))
+            {
+                RequiredInputMap.Emplace(RequiredInput.InputAction, -0.01f);
+            }
+
+            const float RequiredTime = RequiredInput.RequiredTime;
+
+            const auto InputLambda = [WeakThis, RequiredTime](const FInputActionInstance& Instance) -> void
+                {
+                    UTutorialSubsystem* StrongThis = WeakThis.Get();
+                    UWorld* World = StrongThis ? StrongThis->GetWorld() : nullptr;
+
+                    if (!World) return;
+
+                    const float DeltaTime = World->GetDeltaSeconds();
+                    const UInputAction* InputAction = Instance.GetSourceAction();
+
+                    float* CurrentTimePtr = StrongThis->RequiredInputMap.Find(InputAction);
+
+                    if (!CurrentTimePtr || *CurrentTimePtr >= RequiredTime) return;
+
+                    //We only want to increment time on actions that are currently needed.
+                    const auto Predicate = [InputAction](const FRequiredTutorialInput& Input) { return Input.InputAction == InputAction; };
+
+                    if (StrongThis->CurrentState.RequiredInput.ContainsByPredicate(Predicate))
+                    {
+                        *CurrentTimePtr += DeltaTime;
+
+                        if (*CurrentTimePtr >= RequiredTime)
+                        {
+                            StrongThis->OnRequiredInputFinished(InputAction);
+                        }
+                    }
+                };
+
+            UEnhancedInputComponent* InputComponent = nullptr;
+
+            if (RequiredInput.IsShipAction && ShipPawn.IsValid())
+            {
+                InputComponent = Cast<UEnhancedInputComponent>(ShipPawn->InputComponent);
+
+                if (InputComponent)
+                {
+                    InputComponent->BindActionInstanceLambda(RequiredInput.InputAction, ETriggerEvent::Triggered, InputLambda);
+                }
+            }
+
+            if (RequiredInput.IsHunterAction && BountyHunter)
+            {
+                InputComponent = Cast<UEnhancedInputComponent>(BountyHunter->InputComponent);
+
+                if (InputComponent)
+                {
+                    InputComponent->BindActionInstanceLambda(RequiredInput.InputAction, ETriggerEvent::Triggered, InputLambda);
+                }
+            }
+
+            if (RequiredInput.IsUIAction && PlayerController)
+            {
+                InputComponent = Cast<UEnhancedInputComponent>(PlayerController->InputComponent);
+
+                if (InputComponent)
+                {
+                    InputComponent->BindActionInstanceLambda(RequiredInput.InputAction, ETriggerEvent::Triggered, InputLambda);
+                }
+            }
+        }
+    }
+
+    TutorialFunctionMap.Emplace(TAG_Tutorial_Ship_Sonar, [WeakThis]() { if (WeakThis.IsValid()) WeakThis->OnShipTutorialsComplete(); });
+    TutorialFunctionMap.Emplace(TAG_Tutorial_Core_Clues, [WeakThis]() { if (WeakThis.IsValid()) WeakThis->OnCluesFound(); });
+
+    TriggerNewTutorialState(TAG_Tutorial_Ship_Movement);
+    OnBetsyTutorialStart();
+}
+```
+
+<h5 style="text-align: center;">Settings</h5>
+The settings are super simple right now and just allow for input inversion but
+was set up in a generic way using delegate bindings in a direct model-view
+binding approach that allows for quicker testing. Here is that code:
+
+```cpp
+template<typename TValue>
+inline void BindToPlayerPrefs(TMulticastDelegate<void(TValue)>& Delegate, void(UPlayerPrefsSubsystem::*Function)(TValue))
+{
+	if (ULocalPlayer* LocalPlayer = GetOwningLocalPlayer())
+	{
+		if (UPlayerPrefsSubsystem* PlayerPrefs = LocalPlayer->GetSubsystem<UPlayerPrefsSubsystem>())
+		{
+			Delegate.AddUObject(PlayerPrefs, Function);
+		}
+	}
+}
+
+void USettingsWidget::BindToggle(UToggle* Toggle, void(UPlayerPrefsSubsystem::* Setter)(bool))
+{
+	if (!Toggle) return;
+
+	BindToPlayerPrefs<bool>(Toggle->OnValueChangedInternal, Setter);
+}
+
+void USettingsWidget::UnbindToggle(UToggle* Toggle)
+{
+	if (!Toggle) return;
+
+	if (ULocalPlayer* LocalPlayer = GetOwningLocalPlayer())
+	{
+		if (UPlayerPrefsSubsystem* PlayerPrefs = LocalPlayer->GetSubsystem<UPlayerPrefsSubsystem>())
+		{
+			Toggle->OnValueChangedInternal.RemoveAll(PlayerPrefs);
+		}
+	}
+}
+
+void USettingsWidget::InitializeToggle(UToggle* Toggle, bool(UPlayerPrefsSubsystem::* Getter)() const)
+{
+	if (!Toggle || !Getter) return;
+
+	if (ULocalPlayer* LocalPlayer = GetOwningLocalPlayer())
+	{
+		if (UPlayerPrefsSubsystem* PlayerPrefs = LocalPlayer->GetSubsystem<UPlayerPrefsSubsystem>())
+		{
+			Toggle->SetValue((PlayerPrefs->*Getter)());
+		}
+	}
+}
+
+void USettingsWidget::OnPlayerPrefsLoaded()
+{
+	InitializeToggle(InvertXToggle, &UPlayerPrefsSubsystem::GetInvertX);
+	InitializeToggle(InvertYToggle, &UPlayerPrefsSubsystem::GetInvertY);
+}
+
+void USettingsWidget::NativeOnInitialized()
+{
+	Super::NativeOnInitialized();
+
+	if (ULocalPlayer* LocalPlayer = GetOwningLocalPlayer())
+	{
+		if (UPlayerPrefsSubsystem* PlayerPrefs = LocalPlayer->GetSubsystem<UPlayerPrefsSubsystem>())
+		{
+			PlayerPrefs->OnPlayerPrefsLoaded.AddDynamic(this, &USettingsWidget::OnPlayerPrefsLoaded);
+		}
+	}
+
+	InitializeToggle(InvertXToggle, &UPlayerPrefsSubsystem::GetInvertX);
+	InitializeToggle(InvertYToggle, &UPlayerPrefsSubsystem::GetInvertY);
+
+	BindToggle(InvertXToggle, &UPlayerPrefsSubsystem::SetInvertX);
+	BindToggle(InvertYToggle, &UPlayerPrefsSubsystem::SetInvertY);
+}
+```
+
+<h5 style="text-align: center;">Conclusion</h5>
+Overall, this sprint served more so as a final implementation of the features we
+want or needed and thus a lot of it was not super code heavy and instead asset
+import and changing heavy. Sprint seven more or less will be similar. Thanks for
+reading!
